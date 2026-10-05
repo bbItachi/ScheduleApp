@@ -7,14 +7,14 @@ enum class WeekType { ODD, EVEN }
 
 @Serializable
 data class SubgroupPair(
-    val index: Int,       // 1 или 2
+    val index: Int,
     val subject: String,
     val teacher: String,
     val room: String
 )
 
 @Serializable
-data class Pair(
+data class Lesson(
     val number: Int,
     val time: String,
     val day: String,
@@ -24,6 +24,6 @@ data class Pair(
 
 @Serializable
 data class SavedSchedule(
-    val pairs: List<Pair>,
+    val pairs: List<Lesson>,
     val importedAt: Long
 )
