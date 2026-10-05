@@ -42,13 +42,12 @@ fun App() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var pairs by remember { mutableStateOf<List<Pair>>(emptyList()) }
+    var pairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
     var week by remember { mutableStateOf(ScheduleStore.currentWeek(ctx)) }
     var weather by remember { mutableStateOf<Weather.Info?>(null) }
     var status by remember { mutableStateOf("") }
     var now by remember { mutableStateOf(Date()) }
 
-    // Загрузка расписания из памяти
     LaunchedEffect(Unit) {
         pairs = ScheduleStore.load(ctx)?.pairs ?: emptyList()
         weather = Weather.fetch()
@@ -57,7 +56,6 @@ fun App() {
         }
     }
 
-    // Тик каждую секунду
     LaunchedEffect(Unit) {
         while (true) {
             now = Date()
@@ -65,7 +63,6 @@ fun App() {
         }
     }
 
-    // Запрос разрешения на уведомления
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
@@ -78,7 +75,6 @@ fun App() {
         }
     }
 
-    // Выбор файла
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -110,7 +106,6 @@ fun App() {
     Surface(Modifier.fillMaxSize(), color = Color(0xFF1E1E2E)) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
 
-            // Заголовок: дата, время, погода
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF313244)),
                 shape = RoundedCornerShape(12.dp),
@@ -136,7 +131,6 @@ fun App() {
 
             Spacer(Modifier.height(12.dp))
 
-            // Переключатель недели
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Неделя: ", color = Color.White, fontSize = 15.sp)
                 Spacer(Modifier.width(4.dp))
@@ -204,7 +198,7 @@ fun App() {
 }
 
 @Composable
-fun PairCard(p: Pair) {
+fun PairCard(p: Lesson) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF313244)),
         shape = RoundedCornerShape(10.dp),
