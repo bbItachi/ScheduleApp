@@ -40,6 +40,7 @@ object XlsxParser {
         val groupCol = colOf(anchor.key)
 
         val maxRow = cells.keys.maxOf { rowOf(it) }
+        val maxCol = cells.keys.maxOf { colOf(it) }
 
         val result = mutableListOf<Lesson>()
         var currentDay: String? = null
@@ -47,10 +48,23 @@ object XlsxParser {
 
         var r = groupRow + 1
         while (r <= maxRow) {
-            val a = cell(cells, r, 1).trim()
+            // Проверяем ВСЕ колонки в строке на "ЧЕТНАЯ"
+            var foundEven = false
+            for (c in 1..maxCol) {
+                val v = cell(cells, r, c)
+                if (v.contains("ЧЕТНАЯ", ignoreCase = true) ||
+                    v.contains("ЧЁТНАЯ", ignoreCase = true)) {
+                    foundEven = true
+                    break
+                }
+            }
+            if (foundEven) week = WeekType.EVEN
 
-            if (a.contains("ЧЕТНАЯ", ignoreCase = true)) week = WeekType.EVEN
-            if (a.uppercase() in DAYS) currentDay = a.uppercase()
+            // День недели ищем в колонках A, B, C
+            for (c in 1..3) {
+                val v = cell(cells, r, c).trim().uppercase()
+                if (v in DAYS) { currentDay = v; break }
+            }
 
             val pairNum = cell(cells, r, 2).trim().toIntOrNull()
 
