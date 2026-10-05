@@ -12,7 +12,7 @@ object XlsxParser {
         "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"
     )
 
-    fun parse(input: InputStream, targetGroup: String): List<Pair> {
+    fun parse(input: InputStream, targetGroup: String): List<Lesson> {
         var sharedStrings = emptyList<String>()
         var sheetXml: String? = null
 
@@ -41,7 +41,7 @@ object XlsxParser {
 
         val maxRow = cells.keys.maxOf { rowOf(it) }
 
-        val result = mutableListOf<Pair>()
+        val result = mutableListOf<Lesson>()
         var currentDay: String? = null
         var week = WeekType.ODD
 
@@ -57,13 +57,11 @@ object XlsxParser {
             if (pairNum != null && currentDay != null) {
                 val time = cell(cells, r, 4).trim()
 
-                // Данные группы в 4 колонках
                 val s1 = cell(cells, r, groupCol).trim()
                 val r1 = cell(cells, r, groupCol + 1).trim()
                 val s2 = cell(cells, r, groupCol + 2).trim()
                 val r2 = cell(cells, r, groupCol + 3).trim()
 
-                // Преподаватели — на следующей строке
                 val t1 = cell(cells, r + 1, groupCol).trim()
                 val tr1 = cell(cells, r + 1, groupCol + 1).trim()
                 val t2 = cell(cells, r + 1, groupCol + 2).trim()
@@ -88,15 +86,13 @@ object XlsxParser {
                 }
 
                 if (subs.isNotEmpty()) {
-                    result += Pair(pairNum, time, currentDay, week, subs)
+                    result += Lesson(pairNum, time, currentDay, week, subs)
                 }
             }
             r++
         }
         return result
     }
-
-    // ---------- XLSX helpers ----------
 
     private fun parseSharedStrings(bytes: ByteArray): List<String> {
         val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = false }
