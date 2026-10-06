@@ -133,13 +133,11 @@ private fun pairStatusText(pairs: List<Lesson>): String? {
     return "пары на сегодня закончились"
 }
 
-// ─── Заметки: строим Map без обращения к ScheduleStore.notesMap ───
-
 private fun buildNotesMap(ctx: android.content.Context): Map<String, String> =
     ScheduleStore.notes(ctx).associate { it.key to it.text }
 
 // ═══════════════════════════════════════════════════════════
-//  ЧАСЫ
+//  ЧАСЫ (без секунд, обновление раз в 30 сек)
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -149,12 +147,12 @@ fun DateClockView() {
 
     LaunchedEffect(Unit) {
         val dfDate = SimpleDateFormat("EEEE, d MMMM", Locale("ru"))
-        val dfTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        val dfTime = SimpleDateFormat("HH:mm", Locale.getDefault())
         while (true) {
             val now = Date()
             dateText = dfDate.format(now).replaceFirstChar { it.uppercase() }
             timeText = dfTime.format(now)
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(30_000)   // было 1000 мс
         }
     }
 
@@ -165,7 +163,7 @@ fun DateClockView() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ»
+//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ» (без анимации — она тормозит)
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -175,39 +173,30 @@ fun PairStatusBar(pairs: List<Lesson>) {
     LaunchedEffect(pairs) {
         while (true) {
             statusText = pairStatusText(pairs)
-            kotlinx.coroutines.delay(30_000)
+            kotlinx.coroutines.delay(60_000)   // раз в минуту
         }
     }
 
-    AnimatedVisibility(
-        visible = statusText != null,
-        enter = fadeIn() + expandVertically(),
-        exit = fadeOut() + shrinkVertically()
-    ) {
-        Column {
-            Spacer(Modifier.height(8.dp))
-            Surface(
-                color = AppColors.AccentSoft,
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, AppColors.Accent),
-                modifier = Modifier.fillMaxWidth()
+    val text = statusText ?: return
+    Column {
+        Spacer(Modifier.height(8.dp))
+        Surface(
+            color = AppColors.AccentSoft,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, AppColors.Accent),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Schedule, null,
-                        tint = AppColors.Accent, modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        statusText ?: "",
-                        color = AppColors.TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                Icon(
+                    Icons.Default.Schedule, null,
+                    tint = AppColors.Accent, modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(text, color = AppColors.TextPrimary, fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -288,7 +277,7 @@ fun TodayScreen() {
         }
     }
     LaunchedEffect(Unit) {
-        weather = Weather.fetch(force = true)
+        weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
     }
 
     if (showImportGroupPicker) {
@@ -313,7 +302,8 @@ fun TodayScreen() {
                                     ScheduleStore.save(ctx, pendingParsed)
                                     pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
                                     status = "Группа $g · пар: ${pendingParsed.size}"
-                                    Notifier.scheduleBeforePairs(ctx)
+                                    // В ФОНЕ
+                                    scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                                     showImportGroupPicker = false
                                 }
                             ) {
@@ -359,7 +349,7 @@ fun TodayScreen() {
                     ScheduleStore.setGroup(ctx, groupsInFile[0])
                     pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
                     status = "Загружено пар: ${parsed.size}, группа: ${groupsInFile[0]}"
-                    Notifier.scheduleBeforePairs(ctx)
+                    withContext(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                 } else {
                     pendingParsed = parsed
                     importGroups = groupsInFile
@@ -484,7 +474,7 @@ fun TodayScreen() {
                             onToggleSkipped = {
                                 ScheduleStore.toggleSkipped(ctx, key)
                                 skipped = ScheduleStore.skipped(ctx)
-                                Notifier.scheduleBeforePairs(ctx)
+                                scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                             },
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
@@ -512,7 +502,7 @@ fun TodayScreen() {
                     onClick = {
                         week = WeekType.ODD
                         ScheduleStore.setCurrentWeek(ctx, WeekType.ODD)
-                        Notifier.scheduleBeforePairs(ctx)
+                        scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                     },
                     label = "Нечётная"
                 )
@@ -522,7 +512,7 @@ fun TodayScreen() {
                     onClick = {
                         week = WeekType.EVEN
                         ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN)
-                        Notifier.scheduleBeforePairs(ctx)
+                        scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                     },
                     label = "Чётная"
                 )
@@ -544,8 +534,8 @@ fun TodayScreen() {
                     icon = Icons.Default.Refresh,
                     onClick = {
                         scope.launch {
-                            weather = Weather.fetch(force = true)
-                            Notifier.scheduleBeforePairs(ctx)
+                            weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
+                            withContext(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                             status = "Обновлено"
                         }
                     }
@@ -573,6 +563,7 @@ fun TodayScreen() {
 @Composable
 fun WeekScreen() {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var week by remember { mutableStateOf(ScheduleStore.currentWeek(ctx)) }
     var search by remember { mutableStateOf("") }
     var showOnlyFavorites by remember { mutableStateOf(false) }
@@ -695,7 +686,7 @@ fun WeekScreen() {
                             onToggleSkipped = {
                                 ScheduleStore.toggleSkipped(ctx, key)
                                 skipped = ScheduleStore.skipped(ctx)
-                                Notifier.scheduleBeforePairs(ctx)
+                                scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                             },
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
@@ -751,6 +742,7 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 @Composable
 fun SettingsScreen() {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var group by remember { mutableStateOf(ScheduleStore.group(ctx)) }
     var groups by remember { mutableStateOf<List<String>>(ScheduleStore.allGroups(ctx)) }
     var morningH by remember { mutableStateOf(ScheduleStore.morningHour(ctx)) }
@@ -784,7 +776,7 @@ fun SettingsScreen() {
                                 ScheduleStore.setGroup(ctx, g)
                                 group = g
                                 showGroupDialog = false
-                                Notifier.scheduleBeforePairs(ctx)
+                                scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -821,14 +813,14 @@ fun SettingsScreen() {
                 SettingRow("Утренняя сводка (часы)", "%02d".format(morningH)) {
                     morningH = (morningH + 1) % 24
                     ScheduleStore.setMorning(ctx, morningH, morningM)
-                    Notifier.scheduleMorning(ctx)
+                    scope.launch(Dispatchers.IO) { Notifier.scheduleMorning(ctx) }
                 }
             }
             item(key = "mm") {
                 SettingRow("Утренняя сводка (минуты)", "%02d".format(morningM)) {
                     morningM = (morningM + 5) % 60
                     ScheduleStore.setMorning(ctx, morningH, morningM)
-                    Notifier.scheduleMorning(ctx)
+                    scope.launch(Dispatchers.IO) { Notifier.scheduleMorning(ctx) }
                 }
             }
             item(key = "bm") {
@@ -837,7 +829,7 @@ fun SettingsScreen() {
                         5 -> 10; 10 -> 15; 15 -> 20; 20 -> 30; else -> 5
                     }
                     ScheduleStore.setBeforeMinutes(ctx, beforeMin)
-                    Notifier.scheduleBeforePairs(ctx)
+                    scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                 }
             }
             item(key = "aw") {
@@ -855,7 +847,7 @@ fun SettingsScreen() {
                         onCheckedChange = {
                             autoWeek = it
                             ScheduleStore.setAutoWeek(ctx, it)
-                            Notifier.scheduleBeforePairs(ctx)
+                            scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
@@ -901,9 +893,11 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        Notifier.scheduleMorning(ctx)
-                        Notifier.scheduleBeforePairs(ctx)
-                        RescheduleWorker.schedule(ctx)
+                        scope.launch(Dispatchers.IO) {
+                            Notifier.scheduleMorning(ctx)
+                            Notifier.scheduleBeforePairs(ctx)
+                            RescheduleWorker.schedule(ctx)
+                        }
                     },
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
