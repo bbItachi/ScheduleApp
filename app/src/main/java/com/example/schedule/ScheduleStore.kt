@@ -6,16 +6,6 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.Calendar
 
-data class Bell(val number: Int, val start: String, val end: String, val breakBefore: Int)
-
-private data class BellCandidate(
-    val num: Int,
-    val startStr: String,
-    val endStr: String,
-    val startMin: Int,
-    val endMin: Int
-)
-
 object ScheduleStore {
     private const val FILE = "schedule.json"
     private const val NOTES_FILE = "notes.json"
@@ -101,6 +91,18 @@ object ScheduleStore {
     fun dndEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean("dnd_enabled", false)
     fun setDndEnabled(ctx: Context, v: Boolean) {
         prefs(ctx).edit().putBoolean("dnd_enabled", v).apply()
+    }
+
+    // ─── Автообновление ───
+
+    fun autoUpdate(ctx: Context): Boolean = prefs(ctx).getBoolean("auto_update", false)
+    fun setAutoUpdate(ctx: Context, v: Boolean) {
+        prefs(ctx).edit().putBoolean("auto_update", v).apply()
+    }
+
+    fun lastAutoUpdate(ctx: Context): Long = prefs(ctx).getLong("last_auto_update", 0)
+    fun setLastAutoUpdate(ctx: Context, t: Long) {
+        prefs(ctx).edit().putLong("last_auto_update", t).apply()
     }
 
     fun favorites(ctx: Context): Set<String> =
@@ -196,7 +198,7 @@ object ScheduleStore {
 
     // ─── Утилиты времени ───
 
-    private fun timeToMinutes(t: String): Int? {
+    fun timeToMinutes(t: String): Int? {
         val clean = t.trim().replace(':', '.')
         val parts = clean.split(Regex("[.\\s]+")).filter { it.isNotEmpty() }
         if (parts.size < 2) return null
@@ -205,35 +207,7 @@ object ScheduleStore {
         return h * 60 + m
     }
 
-    // ─── Расписание звонков ───
-
-    fun bells(ctx: Context): List<Bell> {
-        val all = load(ctx)?.pairs ?: return emptyList()
-
-        val candidates = all
-            .filter { it.time.contains("-") }
-            .groupBy { it.number }
-            .mapNotNull { (num, list) ->
-                val time = list.first().time
-                val startStr = time.substringBefore("-").trim()
-                val endStr = time.substringAfter("-").trim()
-                val startMin = timeToMinutes(startStr) ?: return@mapNotNull null
-                val endMin = timeToMinutes(endStr) ?: return@mapNotNull null
-                BellCandidate(num, startStr, endStr, startMin, endMin)
-            }
-            .sortedBy { it.num }
-
-        val result = mutableListOf<Bell>()
-        var prevEnd: Int? = null
-        for (c in candidates) {
-            val breakMin = if (prevEnd != null) c.startMin - prevEnd else 0
-            result += Bell(c.num, c.startStr, c.endStr, breakMin)
-            prevEnd = c.endMin
-        }
-        return result
-    }
-
-    // ─── Пары преподавателя ───
+    // ─── Преподаватели ───
 
     fun lessonsByTeacher(ctx: Context, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
