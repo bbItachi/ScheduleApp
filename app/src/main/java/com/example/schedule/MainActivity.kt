@@ -9,6 +9,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
@@ -18,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,7 +39,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun App() {
-    var tab by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { 3 })
 
     val navColors = NavigationBarItemDefaults.colors(
         selectedIconColor = AppColors.Accent,
@@ -49,10 +53,16 @@ fun App() {
     Surface(Modifier.fillMaxSize(), color = AppColors.Background) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
-                when (tab) {
-                    0 -> TodayScreen()
-                    1 -> WeekScreen()
-                    2 -> SettingsScreen()
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = true
+                ) { page ->
+                    when (page) {
+                        0 -> TodayScreen()
+                        1 -> WeekScreen()
+                        2 -> SettingsScreen()
+                    }
                 }
             }
             NavigationBar(
@@ -60,19 +70,22 @@ fun App() {
                 contentColor = AppColors.TextPrimary
             ) {
                 NavigationBarItem(
-                    selected = tab == 0, onClick = { tab = 0 },
+                    selected = pagerState.currentPage == 0,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                     icon = { Icon(Icons.Default.Home, null) },
                     label = { Text("Сегодня") },
                     colors = navColors
                 )
                 NavigationBarItem(
-                    selected = tab == 1, onClick = { tab = 1 },
+                    selected = pagerState.currentPage == 1,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                     icon = { Icon(Icons.Default.DateRange, null) },
                     label = { Text("Неделя") },
                     colors = navColors
                 )
                 NavigationBarItem(
-                    selected = tab == 2, onClick = { tab = 2 },
+                    selected = pagerState.currentPage == 2,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
                     icon = { Icon(Icons.Default.Settings, null) },
                     label = { Text("Настройки") },
                     colors = navColors
