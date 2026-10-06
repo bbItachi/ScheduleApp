@@ -1,5 +1,6 @@
 package com.example.schedule
 
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -8,8 +9,6 @@ import android.os.PowerManager
 import android.provider.Settings
 
 object PermissionsHelper {
-
-    // ─── Батарея ───
 
     fun isBatteryOptimizationIgnored(ctx: Context): Boolean {
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -28,8 +27,6 @@ object PermissionsHelper {
         }
     }
 
-    // ─── Точные будильники ───
-
     fun hasExactAlarmPermission(ctx: Context): Boolean {
         if (Build.VERSION.SDK_INT < 31) return true
         return try {
@@ -47,8 +44,6 @@ object PermissionsHelper {
         } catch (_: Exception) { }
     }
 
-    // ─── Уведомления ───
-
     fun openNotificationSettings(ctx: Context) {
         try {
             val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -57,13 +52,26 @@ object PermissionsHelper {
         } catch (_: Exception) { }
     }
 
-    // ─── Страница приложения (для автозапуска и др.) ───
-
     fun openAppSettings(ctx: Context) {
         try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
             intent.data = Uri.parse("package:${ctx.packageName}")
             ctx.startActivity(intent)
+        } catch (_: Exception) { }
+    }
+
+    // ─── Не беспокоить ───
+
+    fun hasDndAccess(ctx: Context): Boolean {
+        return try {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.isNotificationPolicyAccessGranted
+        } catch (_: Exception) { false }
+    }
+
+    fun openDndSettings(ctx: Context) {
+        try {
+            ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
         } catch (_: Exception) { }
     }
 }
