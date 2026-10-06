@@ -2,6 +2,8 @@ package com.example.schedule
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -340,9 +342,10 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЭКРАН «НАСТРОЙКИ»
+//  ЭКРАН «НАСТРОЙКИ» (с debug-режимом)
 // ═══════════════════════════════════════════════════════════
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen() {
     val ctx = LocalContext.current
@@ -353,10 +356,13 @@ fun SettingsScreen() {
     var beforeMin by remember { mutableStateOf(ScheduleStore.beforeMinutes(ctx)) }
     var autoWeek by remember { mutableStateOf(ScheduleStore.autoWeek(ctx)) }
     var showGroupDialog by remember { mutableStateOf(false) }
+    var debugMode by remember { mutableStateOf(false) }
+    var totalPairs by remember { mutableStateOf(0) }
 
     LaunchedEffect(Unit) {
         groups = ScheduleStore.allGroups(ctx)
         group = ScheduleStore.group(ctx)
+        totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
     }
 
     if (showGroupDialog) {
@@ -456,9 +462,66 @@ fun SettingsScreen() {
                 }
             )
         }
+        Divider(color = AppColors.Divider)
 
-        Spacer(Modifier.height(16.dp))
-        Text("Версия 1.0", color = AppColors.TextDim, fontSize = 12.sp)
+        Spacer(Modifier.height(24.dp))
+
+        // ⚙️ DEBUG-режим: долгое нажатие на «Версия 1.0»
+        Text(
+            text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
+            color = if (debugMode) AppColors.Accent else AppColors.TextDim,
+            fontSize = 12.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { debugMode = !debugMode }
+                )
+                .padding(vertical = 8.dp)
+        )
+
+        if (debugMode) {
+            Spacer(Modifier.height(12.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = AppColors.Card),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("🐛 Отладочная информация", color = AppColors.Accent,
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    DebugLine("Всего пар в базе", "$totalPairs")
+                    DebugLine("Групп", "${groups.size}")
+                    DebugLine("Текущая неделя",
+                        if (ScheduleStore.currentWeek(ctx) == WeekType.EVEN) "Чётная" else "Нечётная")
+                    DebugLine("Координаты погоды", "56.60, 84.85 (Северск)")
+                    DebugLine("Напоминание за", "$beforeMin мин")
+                    DebugLine("Утренняя сводка", "%02d:%02d".format(morningH, morningM))
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            ScheduleStore.clear(ctx)
+                            totalPairs = 0
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.AccentDark
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("🗑 Сбросить расписание") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DebugLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Text(label, color = AppColors.TextSecondary, fontSize = 12.sp,
+            modifier = Modifier.weight(1f))
+        Text(value, color = AppColors.TextPrimary, fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold)
     }
 }
 
