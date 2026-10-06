@@ -134,7 +134,7 @@ private fun pairStatusText(pairs: List<Lesson>): String? {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЧАСЫ (изолированный компонент — тикают отдельно от экрана)
+//  ЧАСЫ (изолированный компонент — тикают отдельно)
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -160,7 +160,7 @@ fun DateClockView() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ» (изолированный компонент)
+//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ» (изолированный)
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -170,7 +170,7 @@ fun PairStatusBar(pairs: List<Lesson>) {
     LaunchedEffect(pairs) {
         while (true) {
             statusText = pairStatusText(pairs)
-            kotlinx.coroutines.delay(30_000)   // раз в 30 секунд
+            kotlinx.coroutines.delay(30_000)
         }
     }
 
@@ -266,10 +266,10 @@ fun TodayScreen() {
     var week by remember { mutableStateOf(ScheduleStore.currentWeek(ctx)) }
     var weather by remember { mutableStateOf<Weather.Info?>(null) }
     var status by remember { mutableStateOf("") }
-    var favorites by remember { mutableStateOf(ScheduleStore.favorites(ctx)) }
-    var skipped by remember { mutableStateOf(ScheduleStore.skipped(ctx)) }
+    var favorites by remember { mutableStateOf<Set<String>>(ScheduleStore.favorites(ctx)) }
+    var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
     var isLoading by remember { mutableStateOf(false) }
-    var notesMap by remember { mutableStateOf(ScheduleStore.notesMap(ctx)) }
+    var notesMap by remember { mutableStateOf<Map<String, String>>(ScheduleStore.notesMap(ctx)) }
 
     var showImportGroupPicker by remember { mutableStateOf(false) }
     var importGroups by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -384,7 +384,6 @@ fun TodayScreen() {
                 Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Изолированные часы — тикают без перерисовки всего экрана
                 Box(Modifier.weight(1f)) {
                     DateClockView()
                 }
@@ -419,7 +418,6 @@ fun TodayScreen() {
             }
         }
 
-        // Изолированная плашка «до пары»
         PairStatusBar(pairs)
 
         Spacer(Modifier.height(10.dp))
@@ -573,10 +571,10 @@ fun WeekScreen() {
     var week by remember { mutableStateOf(ScheduleStore.currentWeek(ctx)) }
     var search by remember { mutableStateOf("") }
     var showOnlyFavorites by remember { mutableStateOf(false) }
-    var expandedDays by remember { mutableStateOf(setOf(ScheduleStore.dayNameRu())) }
-    var favorites by remember { mutableStateOf(ScheduleStore.favorites(ctx)) }
-    var skipped by remember { mutableStateOf(ScheduleStore.skipped(ctx)) }
-    var notesMap by remember { mutableStateOf(ScheduleStore.notesMap(ctx)) }
+    var expandedDays by remember { mutableStateOf<Set<String>>(setOf(ScheduleStore.dayNameRu())) }
+    var favorites by remember { mutableStateOf<Set<String>>(ScheduleStore.favorites(ctx)) }
+    var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
+    var notesMap by remember { mutableStateOf<Map<String, String>>(ScheduleStore.notesMap(ctx)) }
     var allPairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
 
     LaunchedEffect(week) {
@@ -749,7 +747,7 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 fun SettingsScreen() {
     val ctx = LocalContext.current
     var group by remember { mutableStateOf(ScheduleStore.group(ctx)) }
-    var groups by remember { mutableStateOf(ScheduleStore.allGroups(ctx)) }
+    var groups by remember { mutableStateOf<List<String>>(ScheduleStore.allGroups(ctx)) }
     var morningH by remember { mutableStateOf(ScheduleStore.morningHour(ctx)) }
     var morningM by remember { mutableStateOf(ScheduleStore.morningMinute(ctx)) }
     var beforeMin by remember { mutableStateOf(ScheduleStore.beforeMinutes(ctx)) }
