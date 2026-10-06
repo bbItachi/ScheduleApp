@@ -90,7 +90,6 @@ object ScheduleStore {
         prefs(ctx).edit().putLong("sem_start", t).apply()
     }
 
-    // ─── Режим «Не беспокоить» ───
     fun dndEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean("dnd_enabled", false)
     fun setDndEnabled(ctx: Context, v: Boolean) {
         prefs(ctx).edit().putBoolean("dnd_enabled", v).apply()
@@ -187,32 +186,43 @@ object ScheduleStore {
         return if (weekNum % 2 == 0) WeekType.ODD else WeekType.EVEN
     }
 
-    // ─── Расписание звонков ───
+    // ─── Утилиты времени ───
 
     private fun timeToMinutes(t: String): Int? {
-        val clean = t.trim().replace(':', '.').replace("-", " ")
-        val parts = clean.split(Regex("\\s+"))
-        if (parts.isEmpty()) return null
-        val hm = parts[0].split(".")
-        if (hm.size < 2) return null
-        val h = hm[0].toIntOrNull() ?: return null
-        val m = hm[1].toIntOrNull() ?: return null
+        val clean = t.trim().replace(':', '.')
+        val parts = clean.split(Regex("[.\\s]+")).filter { it.isNotEmpty() }
+        if (parts.size < 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
         return h * 60 + m
     }
 
+    // ─── Расписание звонков ───
+
     fun bells(ctx: Context): List<Bell> {
         val all = load(ctx)?.pairs ?: return emptyList()
-        val unique = all
-            .map { it.number to it.time }
-            .distinct()
-            .sortedBy { it.first }
+        // Группируем по номеру пары и берём первое время (одинаковое у всех групп)
+        val byNumber = all
+            .filter { it.time.contains("-") }
+            .groupBy { it.number }
+            .mapNotNull { (num, list) ->
+                val time = list.first().time
+                val startStr = time.substringBefore("-").trim()
+                val endStr = time.substringAfter("-").trim()
+                val startMin = timeToMinutes(startStr) ?: return@mapNotNull null
+                val endMin = timeToMinutes(endStr) ?: return@mapNotNull null
+                Triple(num, startStr, endStr) to startMin to endMin
+            }
+            .sortedBy { it.first.first }
+
         val result = mutableListOf<Bell>()
         var prevEnd: Int? = null
-        for ((num, time) in unique) {
-            val startStr = time.substringBefore("-").trim()
-            val endStr = time.substringAfter("-").trim()
-            val startMin = timeToMinutes(startStr) ?: continue
-            val endMin = timeToMinutes(endStr) ?: continue
+        for (triple in byNumber) {
+            val num = triple.first.first
+            val startStr = triple.first.second
+            val endStr = triple.first.third
+            val startMin = triple.second
+            val endMin = triple.third
             val breakMin = if (prevEnd != null) startMin - prevEnd else 0
             result += Bell(num, startStr, endStr, breakMin)
             prevEnd = endMin
@@ -220,12 +230,24 @@ object ScheduleStore {
         return result
     }
 
-    // ─── Все пары преподавателя за обе недели ───
+    // ─── Пары преподавателя ───
 
     fun lessonsByTeacher(ctx: Context, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
-        return all.filter { l -> l.subgroups.any { it.teacher.contains(teacher, true) } }
-            .sortedWith(compareBy({ it.week.name }, { it.day }, { it.number }))
+        // Уникальные по (day, week, number, group) — убираем дубли из-за подгрупп
+        val unique = LinkedHashMap<String, Lesson>()
+        for (l in all) {
+            if (!l.subgroups.any { it.teacher.contains(teacher, true) }) continue
+            val key = "${l.day}|${l.week.name}|${l.number}|${l.group}"
+            if (!unique.containsKey(key)) unique[key] = l
+        }
+        return unique.values.sortedWith(
+            compareBy(
+                { if (it.week == WeekType.EVEN) 0 else 1 },  // сначала чётная
+                { dayOrder(it.day) },                          // Пн..Вс
+                { it.number }                                  // по номеру пары
+            )
+        )
     }
 
     fun allTeachers(ctx: Context): List<String> {
@@ -234,5 +256,17 @@ object ScheduleStore {
             .filter { it.isNotBlank() }
             .distinct()
             .sorted()
+    }
+
+    // Порядок дня недели: Пн=1 ... Вс=7
+    fun dayOrder(day: String): Int = when (day) {
+        "ПОНЕДЕЛЬНИК" -> 1
+        "ВТОРНИК" -> 2
+        "СРЕДА" -> 3
+        "ЧЕТВЕРГ" -> 4
+        "ПЯТНИЦА" -> 5
+        "СУББОТА" -> 6
+        "ВОСКРЕСЕНЬЕ" -> 7
+        else -> 99
     }
 }
