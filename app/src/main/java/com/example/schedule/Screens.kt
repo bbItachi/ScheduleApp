@@ -139,7 +139,6 @@ fun TodayScreen() {
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
 
-        // ── Компактная карточка погоды ──
         Card(
             colors = CardDefaults.cardColors(containerColor = AppColors.Card),
             shape = RoundedCornerShape(14.dp),
@@ -150,7 +149,6 @@ fun TodayScreen() {
                 Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Дата/время — слева
                 Column(Modifier.weight(1f)) {
                     Text(
                         dfDate.format(now).replaceFirstChar { it.uppercase() },
@@ -162,7 +160,6 @@ fun TodayScreen() {
                         color = AppColors.TextSecondary, fontSize = 12.sp
                     )
                 }
-                // Погода — справа
                 if (weather != null) {
                     val w = weather!!
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -195,7 +192,6 @@ fun TodayScreen() {
 
         Spacer(Modifier.height(10.dp))
 
-        // ── Заголовок дня ──
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 dayName,
@@ -225,13 +221,9 @@ fun TodayScreen() {
 
         Spacer(Modifier.height(8.dp))
 
-        // ── Расписание (основная часть экрана) ──
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (pairs.isEmpty()) {
-                Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.CheckCircle, null,
@@ -260,7 +252,6 @@ fun TodayScreen() {
             }
         }
 
-        // ── Нижняя панель: неделя слева, кнопки справа ──
         Column {
             if (status.isNotEmpty()) {
                 Text(
@@ -272,7 +263,6 @@ fun TodayScreen() {
                 Modifier.fillMaxWidth().padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Слева — выбор недели
                 AppFilterChip(
                     selected = week == WeekType.ODD,
                     onClick = {
@@ -295,7 +285,6 @@ fun TodayScreen() {
 
                 Spacer(Modifier.weight(1f))
 
-                // Справа — кнопки действий
                 CircleIconButton(
                     icon = Icons.Default.Upload,
                     filled = true,
@@ -496,7 +485,7 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЭКРАН «НАСТРОЙКИ» (с debug-режимом — 5 секунд)
+//  ЭКРАН «НАСТРОЙКИ»
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -512,10 +501,16 @@ fun SettingsScreen() {
     var debugMode by remember { mutableStateOf(false) }
     var totalPairs by remember { mutableStateOf(0) }
 
+    // Статусы разрешений (перечитываются при заходе и после нажатий)
+    var batteryOk by remember { mutableStateOf(PermissionsHelper.isBatteryOptimizationIgnored(ctx)) }
+    var exactAlarmOk by remember { mutableStateOf(PermissionsHelper.hasExactAlarmPermission(ctx)) }
+
     LaunchedEffect(Unit) {
         groups = ScheduleStore.allGroups(ctx)
         group = ScheduleStore.group(ctx)
         totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
+        batteryOk = PermissionsHelper.isBatteryOptimizationIgnored(ctx)
+        exactAlarmOk = PermissionsHelper.hasExactAlarmPermission(ctx)
     }
 
     if (showGroupDialog) {
@@ -555,141 +550,262 @@ fun SettingsScreen() {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Настройки", color = AppColors.TextPrimary,
             fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
-        SettingRow(
-            title = "Группа",
-            value = group.ifEmpty { "не выбрана" },
-            onClick = { showGroupDialog = true }
-        )
+        LazyColumn(Modifier.fillMaxSize()) {
 
-        SettingRow(
-            title = "Утренняя сводка (часы)",
-            value = "%02d".format(morningH),
-            onClick = {
-                morningH = (morningH + 1) % 24
-                ScheduleStore.setMorning(ctx, morningH, morningM)
-                Notifier.scheduleMorning(ctx)
+            // ═══ Блок: Основное ═══
+            item {
+                SectionTitle("Основное")
             }
-        )
-
-        SettingRow(
-            title = "Утренняя сводка (минуты)",
-            value = "%02d".format(morningM),
-            onClick = {
-                morningM = (morningM + 5) % 60
-                ScheduleStore.setMorning(ctx, morningH, morningM)
-                Notifier.scheduleMorning(ctx)
-            }
-        )
-
-        SettingRow(
-            title = "Напоминание до пары",
-            value = "$beforeMin мин",
-            onClick = {
-                beforeMin = when (beforeMin) {
-                    5 -> 10
-                    10 -> 15
-                    15 -> 20
-                    20 -> 30
-                    else -> 5
-                }
-                ScheduleStore.setBeforeMinutes(ctx, beforeMin)
-                Notifier.scheduleBeforePairs(ctx)
-            }
-        )
-
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Авто-определение недели", color = AppColors.TextPrimary, fontSize = 16.sp)
-                Text("Требуется дата начала семестра",
-                    color = AppColors.TextSecondary, fontSize = 12.sp)
-            }
-            Switch(
-                checked = autoWeek,
-                onCheckedChange = {
-                    autoWeek = it
-                    ScheduleStore.setAutoWeek(ctx, it)
-                    Notifier.scheduleBeforePairs(ctx)
-                },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = AppColors.Accent,
-                    uncheckedThumbColor = AppColors.TextDim,
-                    uncheckedTrackColor = AppColors.CardElevated,
-                    uncheckedBorderColor = AppColors.Border
+            item {
+                SettingRow(
+                    title = "Группа",
+                    value = group.ifEmpty { "не выбрана" },
+                    onClick = { showGroupDialog = true }
                 )
-            )
-        }
-        Divider(color = AppColors.Divider)
-
-        Spacer(Modifier.height(24.dp))
-
-        // ⚙️ DEBUG — долгое нажатие 5 секунд (без подсказки)
-        Surface(
-            color = Color.Transparent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            val start = System.currentTimeMillis()
-                            tryAwaitRelease()
-                            val duration = System.currentTimeMillis() - start
-                            if (duration >= 5000L) {
-                                debugMode = !debugMode
-                            }
+            }
+            item {
+                SettingRow(
+                    title = "Утренняя сводка (часы)",
+                    value = "%02d".format(morningH),
+                    onClick = {
+                        morningH = (morningH + 1) % 24
+                        ScheduleStore.setMorning(ctx, morningH, morningM)
+                        Notifier.scheduleMorning(ctx)
+                    }
+                )
+            }
+            item {
+                SettingRow(
+                    title = "Утренняя сводка (минуты)",
+                    value = "%02d".format(morningM),
+                    onClick = {
+                        morningM = (morningM + 5) % 60
+                        ScheduleStore.setMorning(ctx, morningH, morningM)
+                        Notifier.scheduleMorning(ctx)
+                    }
+                )
+            }
+            item {
+                SettingRow(
+                    title = "Напоминание до пары",
+                    value = "$beforeMin мин",
+                    onClick = {
+                        beforeMin = when (beforeMin) {
+                            5 -> 10
+                            10 -> 15
+                            15 -> 20
+                            20 -> 30
+                            else -> 5
                         }
+                        ScheduleStore.setBeforeMinutes(ctx, beforeMin)
+                        Notifier.scheduleBeforePairs(ctx)
+                    }
+                )
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Авто-определение недели", color = AppColors.TextPrimary, fontSize = 16.sp)
+                        Text("Требуется дата начала семестра",
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = autoWeek,
+                        onCheckedChange = {
+                            autoWeek = it
+                            ScheduleStore.setAutoWeek(ctx, it)
+                            Notifier.scheduleBeforePairs(ctx)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = AppColors.Accent,
+                            uncheckedThumbColor = AppColors.TextDim,
+                            uncheckedTrackColor = AppColors.CardElevated,
+                            uncheckedBorderColor = AppColors.Border
+                        )
                     )
                 }
-        ) {
-            Text(
-                text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
-                color = if (debugMode) AppColors.Accent else AppColors.TextDim,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(vertical = 12.dp)
-            )
-        }
+                Divider(color = AppColors.Divider)
+            }
 
-        if (debugMode) {
-            Spacer(Modifier.height(12.dp))
-            Card(
-                colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, AppColors.Accent),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(14.dp)) {
-                    Text("🐛 Отладочная информация", color = AppColors.Accent,
-                        fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    DebugLine("Всего пар в базе", "$totalPairs")
-                    DebugLine("Групп", "${groups.size}")
-                    DebugLine("Текущая неделя",
-                        if (ScheduleStore.currentWeek(ctx) == WeekType.EVEN) "Чётная" else "Нечётная")
-                    DebugLine("Координаты погоды", "56.60, 84.85 (Северск)")
-                    DebugLine("Напоминание за", "$beforeMin мин")
-                    DebugLine("Утренняя сводка", "%02d:%02d".format(morningH, morningM))
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            ScheduleStore.clear(ctx)
-                            totalPairs = 0
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AppColors.AccentDark,
-                            contentColor = Color.White
-                        ),
+            // ═══ Блок: Разрешения и фоновая работа ═══
+            item {
+                Spacer(Modifier.height(16.dp))
+                SectionTitle("Разрешения и фоновая работа")
+            }
+            item {
+                PermissionRow(
+                    title = "Уведомления",
+                    subtitle = "Чтобы приходили сводки и напоминания",
+                    ok = true,
+                    onClick = { PermissionsHelper.openNotificationSettings(ctx) }
+                )
+            }
+            item {
+                PermissionRow(
+                    title = "Точные будильники",
+                    subtitle = if (exactAlarmOk) "Разрешены" else "Разрешите для точного времени",
+                    ok = exactAlarmOk,
+                    onClick = {
+                        PermissionsHelper.openExactAlarmSettings(ctx)
+                    }
+                )
+            }
+            item {
+                PermissionRow(
+                    title = "Батарея без ограничений",
+                    subtitle = if (batteryOk) "Система не будет усыплять" else "Отключите оптимизацию батареи",
+                    ok = batteryOk,
+                    onClick = {
+                        PermissionsHelper.openBatteryOptimizationSettings(ctx)
+                    }
+                )
+            }
+            item {
+                PermissionRow(
+                    title = "Автозапуск",
+                    subtitle = "Включите в настройках приложения (MIUI/Huawei)",
+                    ok = null,
+                    onClick = { PermissionsHelper.openAppSettings(ctx) }
+                )
+            }
+            item {
+                PermissionRow(
+                    title = "Закрепить в недавних",
+                    subtitle = "Откройте многозадачность и закрепите приложение",
+                    ok = null,
+                    onClick = { PermissionsHelper.openAppSettings(ctx) }
+                )
+            }
+            item {
+                // Кнопка «Перепланировать все уведомления»
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        Notifier.scheduleMorning(ctx)
+                        Notifier.scheduleBeforePairs(ctx)
+                        RescheduleWorker.schedule(ctx)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.AccentDark,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("🔔 Перепланировать уведомления") }
+                Spacer(Modifier.height(16.dp))
+            }
+
+            // ═══ Блок: Debug ═══
+            item {
+                Surface(
+                    color = Color.Transparent,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    val start = System.currentTimeMillis()
+                                    tryAwaitRelease()
+                                    val duration = System.currentTimeMillis() - start
+                                    if (duration >= 5000L) {
+                                        debugMode = !debugMode
+                                    }
+                                }
+                            )
+                        }
+                ) {
+                    Text(
+                        text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
+                        color = if (debugMode) AppColors.Accent else AppColors.TextDim,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                }
+            }
+            if (debugMode) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = AppColors.Card),
                         shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, AppColors.Accent),
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("🗑 Сбросить расписание") }
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("🐛 Отладочная информация", color = AppColors.Accent,
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                            DebugLine("Всего пар в базе", "$totalPairs")
+                            DebugLine("Групп", "${groups.size}")
+                            DebugLine("Текущая неделя",
+                                if (ScheduleStore.currentWeek(ctx) == WeekType.EVEN) "Чётная" else "Нечётная")
+                            DebugLine("Координаты погоды", "56.60, 84.85 (Северск)")
+                            DebugLine("Напоминание за", "$beforeMin мин")
+                            DebugLine("Утренняя сводка", "%02d:%02d".format(morningH, morningM))
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    ScheduleStore.clear(ctx)
+                                    totalPairs = 0
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AppColors.AccentDark,
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("🗑 Сбросить расписание") }
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
                 }
             }
         }
     }
+}
+
+@Composable
+fun SectionTitle(text: String) {
+    Text(
+        text.uppercase(),
+        color = AppColors.TextDim,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+fun PermissionRow(
+    title: String,
+    subtitle: String,
+    ok: Boolean?,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val (icon, tint) = when (ok) {
+            true -> Icons.Default.CheckCircle to AppColors.Accent
+            false -> Icons.Default.Warning to AppColors.Accent
+            null -> Icons.Default.Info to AppColors.TextDim
+        }
+        Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = AppColors.TextPrimary, fontSize = 15.sp)
+            Text(subtitle, color = AppColors.TextSecondary, fontSize = 12.sp)
+        }
+        Icon(Icons.Default.KeyboardArrowRight, null, tint = AppColors.TextDim)
+    }
+    Divider(color = AppColors.Divider)
 }
 
 @Composable
