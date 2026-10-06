@@ -1,6 +1,7 @@
 package com.example.schedule
 
 import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.Calendar
@@ -10,20 +11,56 @@ object ScheduleStore {
     private const val NOTES_FILE = "notes.json"
     private val json = Json { ignoreUnknownKeys = true }
 
+    // ─── Кэш в памяти ───
+    private var scheduleCache: SavedSchedule? = null
+    private var scheduleLoaded = false
+    private var notesCache: List<Note>? = null
+    private var prefsInstance: SharedPreferences? = null
+
+    // Кэш пар: ключ "ПОНЕДЕЛЬНИК|ODD|Д043" → список
+    private val pairsCache = HashMap<String, List<Lesson>>()
+
+    private fun prefs(ctx: Context): SharedPreferences {
+        prefsInstance?.let { return it }
+        val p = ctx.applicationContext.getSharedPreferences("prefs", Context.MODE_PRIVATE)
+        prefsInstance = p
+        return p
+    }
+
+    // ─── Расписание ───
+
     fun save(ctx: Context, pairs: List<Lesson>) {
         val data = SavedSchedule(pairs, System.currentTimeMillis())
         ctx.openFileOutput(FILE, Context.MODE_PRIVATE)
             .use { it.write(json.encodeToString(SavedSchedule.serializer(), data).toByteArray()) }
+        scheduleCache = data
+        scheduleLoaded = true
+        pairsCache.clear()
     }
 
-    fun load(ctx: Context): SavedSchedule? = try {
-        val bytes = ctx.openFileInput(FILE).use { it.readBytes() }
-        json.decodeFromString(SavedSchedule.serializer(), bytes.decodeToString())
-    } catch (_: Exception) { null }
+    fun load(ctx: Context): SavedSchedule? {
+        if (scheduleLoaded) return scheduleCache
+        return try {
+            val bytes = ctx.openFileInput(FILE).use { it.readBytes() }
+            val parsed = json.decodeFromString(SavedSchedule.serializer(), bytes.decodeToString())
+            scheduleCache = parsed
+            scheduleLoaded = true
+            parsed
+        } catch (_: Exception) {
+            scheduleCache = null
+            scheduleLoaded = true
+            null
+        }
+    }
 
-    fun clear(ctx: Context) { ctx.deleteFile(FILE) }
+    fun clear(ctx: Context) {
+        ctx.deleteFile(FILE)
+        scheduleCache = null
+        scheduleLoaded = true
+        pairsCache.clear()
+    }
 
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE)
+    // ─── Настройки ───
 
     fun currentWeek(ctx: Context): WeekType =
         if (prefs(ctx).getString("week", "EVEN") == "ODD") WeekType.ODD else WeekType.EVEN
@@ -34,6 +71,7 @@ object ScheduleStore {
     fun group(ctx: Context): String = prefs(ctx).getString("group", "") ?: ""
     fun setGroup(ctx: Context, g: String) {
         prefs(ctx).edit().putString("group", g).apply()
+        pairsCache.clear()
     }
 
     fun morningHour(ctx: Context): Int = prefs(ctx).getInt("morning_hour", 7)
@@ -57,6 +95,8 @@ object ScheduleStore {
         prefs(ctx).edit().putLong("sem_start", t).apply()
     }
 
+    // ─── Избранное ───
+
     fun favorites(ctx: Context): Set<String> =
         prefs(ctx).getStringSet("favorites", emptySet()) ?: emptySet()
 
@@ -67,7 +107,7 @@ object ScheduleStore {
         return added
     }
 
-    // ─── Пропуск пары ───
+    // ─── Пропуск ───
 
     fun skipped(ctx: Context): Set<String> =
         prefs(ctx).getStringSet("skipped", emptySet()) ?: emptySet()
@@ -81,14 +121,20 @@ object ScheduleStore {
 
     // ─── Заметки ───
 
-    fun notes(ctx: Context): List<Note> = try {
-        val bytes = ctx.openFileInput(NOTES_FILE).use { it.readBytes() }
-        json.decodeFromString(ListSerializer(Note.serializer()), bytes.decodeToString())
-    } catch (_: Exception) { emptyList() }
+    fun notes(ctx: Context): List<Note> {
+        notesCache?.let { return it }
+        val result = try {
+            val bytes = ctx.openFileInput(NOTES_FILE).use { it.readBytes() }
+            json.decodeFromString(ListSerializer(Note.serializer()), bytes.decodeToString())
+        } catch (_: Exception) { emptyList() }
+        notesCache = result
+        return result
+    }
 
     private fun saveNotes(ctx: Context, notes: List<Note>) {
         ctx.openFileOutput(NOTES_FILE, Context.MODE_PRIVATE)
             .use { it.write(json.encodeToString(ListSerializer(Note.serializer()), notes).toByteArray()) }
+        notesCache = notes
     }
 
     fun getNote(ctx: Context, key: String): String =
@@ -101,17 +147,28 @@ object ScheduleStore {
         saveNotes(ctx, cur)
     }
 
-    // ─── Данные ───
+    // ─── Данные (с кэшем) ───
 
     fun pairsFor(ctx: Context, day: String, week: WeekType): List<Lesson> {
         val g = group(ctx)
-        return load(ctx)?.pairs?.filter { it.group == g && it.day == day && it.week == week }
+        val key = "$day|${week.name}|$g"
+        pairsCache[key]?.let { return it }
+        val list = load(ctx)?.pairs
+            ?.filter { it.group == g && it.day == day && it.week == week }
             ?.sortedBy { it.number } ?: emptyList()
+        pairsCache[key] = list
+        return list
     }
 
-    fun pairsForDay(ctx: Context, day: String, week: WeekType, group: String): List<Lesson> =
-        load(ctx)?.pairs?.filter { it.group == group && it.day == day && it.week == week }
+    fun pairsForDay(ctx: Context, day: String, week: WeekType, group: String): List<Lesson> {
+        val key = "$day|${week.name}|$group"
+        pairsCache[key]?.let { return it }
+        val list = load(ctx)?.pairs
+            ?.filter { it.group == group && it.day == day && it.week == week }
             ?.sortedBy { it.number } ?: emptyList()
+        pairsCache[key] = list
+        return list
+    }
 
     fun allGroups(ctx: Context): List<String> =
         load(ctx)?.pairs?.map { it.group }?.distinct()?.sorted() ?: emptyList()
