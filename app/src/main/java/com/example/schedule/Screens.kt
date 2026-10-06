@@ -4,7 +4,14 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -18,11 +25,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -83,6 +92,115 @@ fun CircleIconButton(
     }
 }
 
+// ─── Парсинг времени ───
+
+private fun parseStartMinutes(time: String): Int? {
+    val start = time.substringBefore("-").trim().replace(':', '.')
+    val parts = start.split(".")
+    if (parts.size < 2) return null
+    val h = parts[0].toIntOrNull() ?: return null
+    val m = parts[1].toIntOrNull() ?: return null
+    return h * 60 + m
+}
+
+private fun parseEndMinutes(time: String): Int? {
+    val end = time.substringAfter("-").trim().replace(':', '.')
+    val parts = end.split(".")
+    if (parts.size < 2) return null
+    val h = parts[0].toIntOrNull() ?: return null
+    val m = parts[1].toIntOrNull() ?: return null
+    return h * 60 + m
+}
+
+// Возвращает: "идёт 2-я пара" / "через 35 мин до 3-й пары" / null
+private fun pairStatusText(pairs: List<Lesson>): String? {
+    if (pairs.isEmpty()) return null
+    val now = Calendar.getInstance()
+    val nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+
+    // Если идёт пара
+    for (p in pairs) {
+        val s = parseStartMinutes(p.time) ?: continue
+        val e = parseEndMinutes(p.time) ?: continue
+        if (nowMin in s until e) {
+            val left = e - nowMin
+            return "идёт ${p.number}-я пара · до конца $left мин"
+        }
+    }
+    // Иначе — ближайшая будущая
+    for (p in pairs) {
+        val s = parseStartMinutes(p.time) ?: continue
+        if (s > nowMin) {
+            val diff = s - nowMin
+            val h = diff / 60
+            val m = diff % 60
+            val time = if (h > 0) "${h} ч ${m} мин" else "${m} мин"
+            return "через $time до ${p.number}-й пары"
+        }
+    }
+    return "пары на сегодня закончились"
+}
+
+// ═══════════════════════════════════════════════════════════
+//  СКЕЛЕТОН
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+fun SkeletonCard() {
+    val infinite = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infinite.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    Card(
+        colors = CardDefaults.cardColors(containerColor = AppColors.Card),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+    ) {
+        Column(Modifier.padding(14.dp).alpha(alpha)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(36.dp)
+                        .background(AppColors.CardElevated, RoundedCornerShape(8.dp))
+                )
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier.height(14.dp).width(100.dp)
+                        .background(AppColors.CardElevated, RoundedCornerShape(4.dp))
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier.height(16.dp).fillMaxWidth(0.85f)
+                    .background(AppColors.CardElevated, RoundedCornerShape(4.dp))
+            )
+            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier.height(12.dp).fillMaxWidth(0.55f)
+                    .background(AppColors.CardElevated, RoundedCornerShape(4.dp))
+            )
+            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier.height(12.dp).fillMaxWidth(0.35f)
+                    .background(AppColors.CardElevated, RoundedCornerShape(4.dp))
+            )
+        }
+    }
+}
+
+@Composable
+fun SkeletonList() {
+    Column(Modifier.fillMaxSize()) {
+        repeat(4) { SkeletonCard() }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  ЭКРАН «СЕГОДНЯ»
 // ═══════════════════════════════════════════════════════════
@@ -98,8 +216,9 @@ fun TodayScreen() {
     var status by remember { mutableStateOf("") }
     var now by remember { mutableStateOf(Date()) }
     var favorites by remember { mutableStateOf(ScheduleStore.favorites(ctx)) }
+    var skipped by remember { mutableStateOf(ScheduleStore.skipped(ctx)) }
+    var isLoading by remember { mutableStateOf(false) }
 
-    // Состояние диалога выбора группы после импорта
     var showImportGroupPicker by remember { mutableStateOf(false) }
     var importGroups by remember { mutableStateOf<List<String>>(emptyList()) }
     var pendingParsed by remember { mutableStateOf<List<Lesson>>(emptyList()) }
@@ -114,7 +233,6 @@ fun TodayScreen() {
         while (true) { now = Date(); kotlinx.coroutines.delay(1000) }
     }
 
-    // ── Диалог выбора группы после загрузки файла ──
     if (showImportGroupPicker) {
         AlertDialog(
             onDismissRequest = { showImportGroupPicker = false },
@@ -122,7 +240,7 @@ fun TodayScreen() {
             text = {
                 Column {
                     Text(
-                        "Найдено групп: ${importGroups.size}. Выбери свою — покажу её расписание.",
+                        "Найдено групп: ${importGroups.size}. Выбери свою.",
                         color = AppColors.TextSecondary, fontSize = 13.sp
                     )
                     Spacer(Modifier.height(10.dp))
@@ -140,7 +258,7 @@ fun TodayScreen() {
                                         pairs = ScheduleStore.pairsFor(
                                             ctx, ScheduleStore.dayNameRu(), week
                                         )
-                                        status = "Выбрана группа $g, пар: ${pendingParsed.size}"
+                                        status = "Группа $g · пар: ${pendingParsed.size}"
                                         Notifier.scheduleBeforePairs(ctx)
                                         showImportGroupPicker = false
                                     }
@@ -174,32 +292,32 @@ fun TodayScreen() {
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            isLoading = true
             status = "Парсим…"
             try {
                 val parsed = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)!!.use { XlsxParser.parse(it) }
                 }
-                // Уникальные группы из файла
                 val groupsInFile = parsed.map { it.group }.distinct().sorted()
 
                 if (groupsInFile.isEmpty()) {
-                    status = "В файле не найдено ни одной группы"
+                    status = "В файле не найдено групп"
                 } else if (groupsInFile.size == 1) {
-                    // Только одна группа — сразу применяем
                     ScheduleStore.save(ctx, parsed)
                     ScheduleStore.setGroup(ctx, groupsInFile[0])
                     pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
                     status = "Загружено пар: ${parsed.size}, группа: ${groupsInFile[0]}"
                     Notifier.scheduleBeforePairs(ctx)
                 } else {
-                    // Несколько — показываем диалог
                     pendingParsed = parsed
                     importGroups = groupsInFile
                     showImportGroupPicker = true
-                    status = "Найдено групп: ${groupsInFile.size}. Выбери свою."
+                    status = "Найдено групп: ${groupsInFile.size}"
                 }
             } catch (e: Exception) {
                 status = "Ошибка: ${e.message}"
+            } finally {
+                isLoading = false
             }
         }
     }
@@ -208,6 +326,7 @@ fun TodayScreen() {
     val dfTime = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dayName = ScheduleStore.dayNameRu()
     val group = ScheduleStore.group(ctx)
+    val statusText = remember(pairs, now) { pairStatusText(pairs) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
 
@@ -262,6 +381,40 @@ fun TodayScreen() {
             }
         }
 
+        // ─── «Сколько до пары» ───
+        AnimatedVisibility(
+            visible = statusText != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            Column {
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = AppColors.AccentSoft,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, AppColors.Accent),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Schedule, null,
+                            tint = AppColors.Accent, modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            statusText ?: "",
+                            color = AppColors.TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(10.dp))
 
         Row(verticalAlignment = Alignment.Bottom) {
@@ -294,8 +447,12 @@ fun TodayScreen() {
         Spacer(Modifier.height(8.dp))
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (pairs.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when {
+                isLoading -> SkeletonList()
+                pairs.isEmpty() -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.CheckCircle, null,
@@ -306,19 +463,30 @@ fun TodayScreen() {
                         Text("Пар нет 🎉", color = AppColors.TextSecondary, fontSize = 16.sp)
                     }
                 }
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(pairs) { p ->
                         val key = "${p.group}|${p.day}|${p.week}|${p.number}"
-                        PairCard(
-                            p = p,
-                            isFavorite = key in favorites,
-                            note = ScheduleStore.getNote(ctx, key),
-                            onToggleFavorite = {
-                                ScheduleStore.toggleFavorite(ctx, key)
-                                favorites = ScheduleStore.favorites(ctx)
-                            }
-                        )
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            PairCard(
+                                p = p,
+                                isFavorite = key in favorites,
+                                isSkipped = key in skipped,
+                                note = ScheduleStore.getNote(ctx, key),
+                                onToggleFavorite = {
+                                    ScheduleStore.toggleFavorite(ctx, key)
+                                    favorites = ScheduleStore.favorites(ctx)
+                                },
+                                onToggleSkipped = {
+                                    ScheduleStore.toggleSkipped(ctx, key)
+                                    skipped = ScheduleStore.skipped(ctx)
+                                    Notifier.scheduleBeforePairs(ctx)
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -406,6 +574,7 @@ fun WeekScreen() {
     var showOnlyFavorites by remember { mutableStateOf(false) }
     var expandedDays by remember { mutableStateOf(setOf(ScheduleStore.dayNameRu())) }
     var favorites by remember { mutableStateOf(ScheduleStore.favorites(ctx)) }
+    var skipped by remember { mutableStateOf(ScheduleStore.skipped(ctx)) }
     var allPairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
 
     LaunchedEffect(week) {
@@ -505,10 +674,16 @@ fun WeekScreen() {
                         PairCard(
                             p = p,
                             isFavorite = key in favorites,
+                            isSkipped = key in skipped,
                             note = ScheduleStore.getNote(ctx, key),
                             onToggleFavorite = {
                                 ScheduleStore.toggleFavorite(ctx, key)
                                 favorites = ScheduleStore.favorites(ctx)
+                            },
+                            onToggleSkipped = {
+                                ScheduleStore.toggleSkipped(ctx, key)
+                                skipped = ScheduleStore.skipped(ctx)
+                                Notifier.scheduleBeforePairs(ctx)
                             }
                         )
                     }
@@ -782,7 +957,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        text = "Версия 1.1" + if (debugMode) "  🐛 DEBUG" else "",
+                        text = "Версия 1.2" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -908,28 +1083,36 @@ fun SettingRow(title: String, value: String, onClick: () -> Unit) {
 fun PairCard(
     p: Lesson,
     isFavorite: Boolean,
+    isSkipped: Boolean,
     note: String,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onToggleSkipped: () -> Unit
 ) {
     val ctx = LocalContext.current
     var noteText by remember { mutableStateOf(note) }
     var editing by remember { mutableStateOf(false) }
 
+    val contentAlpha = if (isSkipped) 0.5f else 1f
+
     Card(
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
+        border = BorderStroke(
+            1.dp,
+            if (isSkipped) AppColors.TextDim else AppColors.Border
+        ),
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(14.dp).alpha(contentAlpha)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    color = AppColors.AccentSoft,
+                    color = if (isSkipped) AppColors.CardElevated else AppColors.AccentSoft,
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         p.number.toString(),
-                        color = AppColors.Accent, fontSize = 18.sp,
+                        color = if (isSkipped) AppColors.TextDim else AppColors.Accent,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
@@ -939,6 +1122,13 @@ fun PairCard(
                     p.time, color = AppColors.TextPrimary, fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = onToggleSkipped) {
+                    Icon(
+                        if (isSkipped) Icons.Default.PlayArrow else Icons.Default.Close,
+                        null,
+                        tint = if (isSkipped) AppColors.Accent else AppColors.TextDim
+                    )
+                }
                 IconButton(onClick = onToggleFavorite) {
                     Icon(
                         if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
@@ -956,8 +1146,13 @@ fun PairCard(
             p.subgroups.forEach { sg ->
                 Column(Modifier.padding(top = 4.dp)) {
                     val prefix = if (p.subgroups.size > 1) "Подгр. ${sg.index}: " else ""
-                    Text(prefix + sg.subject, color = AppColors.TextPrimary,
-                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        prefix + sg.subject,
+                        color = AppColors.TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textDecoration = if (isSkipped) TextDecoration.LineThrough else TextDecoration.None
+                    )
                     Spacer(Modifier.height(4.dp))
                     Row {
                         Text("👤 ", fontSize = 12.sp)
@@ -971,6 +1166,16 @@ fun PairCard(
                             fontWeight = FontWeight.Medium)
                     }
                 }
+            }
+
+            if (isSkipped) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "⏭ Пропущена",
+                    color = AppColors.TextDim,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
 
             if (editing) {
