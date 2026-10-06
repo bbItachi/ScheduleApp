@@ -133,8 +133,13 @@ private fun pairStatusText(pairs: List<Lesson>): String? {
     return "пары на сегодня закончились"
 }
 
+// ─── Заметки: строим Map без обращения к ScheduleStore.notesMap ───
+
+private fun buildNotesMap(ctx: android.content.Context): Map<String, String> =
+    ScheduleStore.notes(ctx).associate { it.key to it.text }
+
 // ═══════════════════════════════════════════════════════════
-//  ЧАСЫ (изолированный компонент — тикают отдельно)
+//  ЧАСЫ
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -160,7 +165,7 @@ fun DateClockView() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ» (изолированный)
+//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ»
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -269,7 +274,7 @@ fun TodayScreen() {
     var favorites by remember { mutableStateOf<Set<String>>(ScheduleStore.favorites(ctx)) }
     var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
     var isLoading by remember { mutableStateOf(false) }
-    var notesMap by remember { mutableStateOf<Map<String, String>>(ScheduleStore.notesMap(ctx)) }
+    var notesMap by remember { mutableStateOf<Map<String, String>>(buildNotesMap(ctx)) }
 
     var showImportGroupPicker by remember { mutableStateOf(false) }
     var importGroups by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -483,7 +488,7 @@ fun TodayScreen() {
                             },
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
-                                notesMap = ScheduleStore.notesMap(ctx)
+                                notesMap = buildNotesMap(ctx)
                             }
                         )
                     }
@@ -574,7 +579,7 @@ fun WeekScreen() {
     var expandedDays by remember { mutableStateOf<Set<String>>(setOf(ScheduleStore.dayNameRu())) }
     var favorites by remember { mutableStateOf<Set<String>>(ScheduleStore.favorites(ctx)) }
     var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
-    var notesMap by remember { mutableStateOf<Map<String, String>>(ScheduleStore.notesMap(ctx)) }
+    var notesMap by remember { mutableStateOf<Map<String, String>>(buildNotesMap(ctx)) }
     var allPairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
 
     LaunchedEffect(week) {
@@ -694,7 +699,7 @@ fun WeekScreen() {
                             },
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
-                                notesMap = ScheduleStore.notesMap(ctx)
+                                notesMap = buildNotesMap(ctx)
                             }
                         )
                     }
