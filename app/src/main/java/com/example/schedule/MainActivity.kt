@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
         Notifier.ensureChannels(this)
         Notifier.scheduleMorning(this)
         Notifier.scheduleBeforePairs(this)
+        RescheduleWorker.schedule(this)
         setContent {
             MaterialTheme(colorScheme = ScheduleDarkScheme) {
                 App()
