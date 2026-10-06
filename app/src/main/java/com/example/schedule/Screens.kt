@@ -112,13 +112,11 @@ private fun parseEndMinutes(time: String): Int? {
     return h * 60 + m
 }
 
-// Возвращает: "идёт 2-я пара" / "через 35 мин до 3-й пары" / null
 private fun pairStatusText(pairs: List<Lesson>): String? {
     if (pairs.isEmpty()) return null
     val now = Calendar.getInstance()
     val nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
 
-    // Если идёт пара
     for (p in pairs) {
         val s = parseStartMinutes(p.time) ?: continue
         val e = parseEndMinutes(p.time) ?: continue
@@ -127,7 +125,6 @@ private fun pairStatusText(pairs: List<Lesson>): String? {
             return "идёт ${p.number}-я пара · до конца $left мин"
         }
     }
-    // Иначе — ближайшая будущая
     for (p in pairs) {
         val s = parseStartMinutes(p.time) ?: continue
         if (s > nowMin) {
@@ -326,7 +323,7 @@ fun TodayScreen() {
     val dfTime = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dayName = ScheduleStore.dayNameRu()
     val group = ScheduleStore.group(ctx)
-    val statusText = remember(pairs, now) { pairStatusText(pairs) }
+    val statusText = pairStatusText(pairs)
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
 
@@ -466,27 +463,21 @@ fun TodayScreen() {
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(pairs) { p ->
                         val key = "${p.group}|${p.day}|${p.week}|${p.number}"
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            PairCard(
-                                p = p,
-                                isFavorite = key in favorites,
-                                isSkipped = key in skipped,
-                                note = ScheduleStore.getNote(ctx, key),
-                                onToggleFavorite = {
-                                    ScheduleStore.toggleFavorite(ctx, key)
-                                    favorites = ScheduleStore.favorites(ctx)
-                                },
-                                onToggleSkipped = {
-                                    ScheduleStore.toggleSkipped(ctx, key)
-                                    skipped = ScheduleStore.skipped(ctx)
-                                    Notifier.scheduleBeforePairs(ctx)
-                                }
-                            )
-                        }
+                        PairCard(
+                            p = p,
+                            isFavorite = key in favorites,
+                            isSkipped = key in skipped,
+                            note = ScheduleStore.getNote(ctx, key),
+                            onToggleFavorite = {
+                                ScheduleStore.toggleFavorite(ctx, key)
+                                favorites = ScheduleStore.favorites(ctx)
+                            },
+                            onToggleSkipped = {
+                                ScheduleStore.toggleSkipped(ctx, key)
+                                skipped = ScheduleStore.skipped(ctx)
+                                Notifier.scheduleBeforePairs(ctx)
+                            }
+                        )
                     }
                 }
             }
