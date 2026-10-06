@@ -130,6 +130,22 @@ private fun pairStatusText(pairs: List<Lesson>): String? {
 private fun buildNotesMap(ctx: android.content.Context): Map<String, String> =
     ScheduleStore.notes(ctx).associate { it.key to it.text }
 
+private fun formatLastUpdate(ts: Long): String {
+    if (ts <= 0L) return "никогда"
+    val now = System.currentTimeMillis()
+    val diff = now - ts
+    val min = diff / 60_000
+    val hour = diff / 3_600_000
+    val day = diff / 86_400_000
+    return when {
+        min < 1 -> "только что"
+        min < 60 -> "$min мин назад"
+        hour < 24 -> "$hour ч назад"
+        day < 7 -> "$day дн назад"
+        else -> SimpleDateFormat("d MMMM", Locale("ru")).format(Date(ts))
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  ЧАСЫ
 // ═══════════════════════════════════════════════════════════
@@ -353,6 +369,7 @@ fun TodayScreen() {
                                     scope.launch(Dispatchers.IO) {
                                         Notifier.scheduleBeforePairs(ctx)
                                         Notifier.scheduleDnd(ctx)
+                                        ScheduleWidget.updateAll(ctx)
                                     }
                                     showImportGroupPicker = false
                                 }
@@ -402,6 +419,7 @@ fun TodayScreen() {
                     withContext(Dispatchers.IO) {
                         Notifier.scheduleBeforePairs(ctx)
                         Notifier.scheduleDnd(ctx)
+                        ScheduleWidget.updateAll(ctx)
                     }
                 } else {
                     pendingParsed = parsed
@@ -551,6 +569,7 @@ fun TodayScreen() {
                         scope.launch(Dispatchers.IO) {
                             Notifier.scheduleBeforePairs(ctx)
                             Notifier.scheduleDnd(ctx)
+                            ScheduleWidget.updateAll(ctx)
                         }
                     },
                     label = "Нечётная"
@@ -564,6 +583,7 @@ fun TodayScreen() {
                         scope.launch(Dispatchers.IO) {
                             Notifier.scheduleBeforePairs(ctx)
                             Notifier.scheduleDnd(ctx)
+                            ScheduleWidget.updateAll(ctx)
                         }
                     },
                     label = "Чётная"
@@ -590,6 +610,7 @@ fun TodayScreen() {
                             withContext(Dispatchers.IO) {
                                 Notifier.scheduleBeforePairs(ctx)
                                 Notifier.scheduleDnd(ctx)
+                                ScheduleWidget.updateAll(ctx)
                             }
                             status = "Обновлено"
                         }
@@ -809,6 +830,10 @@ fun SettingsScreen() {
     var beforeMin by remember { mutableStateOf(ScheduleStore.beforeMinutes(ctx)) }
     var autoWeek by remember { mutableStateOf(ScheduleStore.autoWeek(ctx)) }
     var dndEnabled by remember { mutableStateOf(ScheduleStore.dndEnabled(ctx)) }
+    var autoUpdate by remember { mutableStateOf(ScheduleStore.autoUpdate(ctx)) }
+    var lastUpdate by remember { mutableStateOf(ScheduleStore.lastAutoUpdate(ctx)) }
+    var updateStatus by remember { mutableStateOf("") }
+    var isUpdating by remember { mutableStateOf(false) }
     var showGroupDialog by remember { mutableStateOf(false) }
     var debugMode by remember { mutableStateOf(false) }
     var totalPairs by remember { mutableStateOf(0) }
@@ -841,6 +866,7 @@ fun SettingsScreen() {
                                 scope.launch(Dispatchers.IO) {
                                     Notifier.scheduleBeforePairs(ctx)
                                     Notifier.scheduleDnd(ctx)
+                                    ScheduleWidget.updateAll(ctx)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -929,8 +955,106 @@ fun SettingsScreen() {
                 Divider(color = AppColors.Divider)
             }
 
-            item(key = "sec_dnd") {
+            // ═══ Автообновление ═══
+            item(key = "sec_auto") {
                 Spacer(Modifier.height(16.dp))
+                SectionTitle("Автообновление с сайта колледжа")
+            }
+            item(key = "auto_switch") {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Обновлять автоматически", color = AppColors.TextPrimary, fontSize = 16.sp)
+                        Text("Раз в сутки с сайта споспк.рф",
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = autoUpdate,
+                        onCheckedChange = {
+                            autoUpdate = it
+                            ScheduleStore.setAutoUpdate(ctx, it)
+                            ScheduleUpdater.schedule(ctx, it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = AppColors.Accent,
+                            uncheckedThumbColor = AppColors.TextDim,
+                            uncheckedTrackColor = AppColors.CardElevated,
+                            uncheckedBorderColor = AppColors.Border
+                        )
+                    )
+                }
+                Divider(color = AppColors.Divider)
+            }
+            item(key = "auto_last") {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Refresh, null,
+                        tint = AppColors.TextDim, modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Последнее обновление", color = AppColors.TextPrimary, fontSize = 15.sp)
+                        Text(formatLastUpdate(lastUpdate),
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                }
+                Divider(color = AppColors.Divider)
+            }
+            item(key = "auto_now") {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        isUpdating = true
+                        updateStatus = "Скачиваем…"
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    ScheduleUpdater.runNow(ctx)
+                                }
+                                // Ждём немного и обновляем UI
+                                kotlinx.coroutines.delay(3000)
+                                lastUpdate = ScheduleStore.lastAutoUpdate(ctx)
+                                totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
+                                updateStatus = "Готово · пар: $totalPairs"
+                            } catch (e: Exception) {
+                                updateStatus = "Ошибка: ${e.message}"
+                            } finally {
+                                isUpdating = false
+                            }
+                        }
+                    },
+                    enabled = !isUpdating,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isUpdating) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (isUpdating) "Обновляем…" else "Обновить сейчас")
+                }
+                if (updateStatus.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(updateStatus, color = AppColors.Accent, fontSize = 12.sp)
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
+            item(key = "sec_dnd") {
                 SectionTitle("Не беспокоить")
             }
             item(key = "dnd_switch") {
@@ -1007,6 +1131,7 @@ fun SettingsScreen() {
                             Notifier.scheduleBeforePairs(ctx)
                             Notifier.scheduleDnd(ctx)
                             RescheduleWorker.schedule(ctx)
+                            ScheduleWidget.updateAll(ctx)
                         }
                     },
                     shape = RoundedCornerShape(10.dp),
@@ -1037,7 +1162,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        "Версия 1.4" + if (debugMode) "  🐛 DEBUG" else "",
+                        "Версия 1.5" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -1063,6 +1188,8 @@ fun SettingsScreen() {
                             DebugLine("Координаты погоды", "56.60, 84.85 (Северск)")
                             DebugLine("Напоминание за", "$beforeMin мин")
                             DebugLine("DND авто-режим", if (dndEnabled) "включен" else "выключен")
+                            DebugLine("Автообновление", if (autoUpdate) "включено" else "выключено")
+                            DebugLine("Последнее обновление", formatLastUpdate(lastUpdate))
                             DebugLine("Утренняя сводка", "%02d:%02d".format(morningH, morningM))
                             Spacer(Modifier.height(12.dp))
                             Button(
