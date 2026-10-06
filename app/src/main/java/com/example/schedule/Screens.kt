@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -18,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -39,7 +41,7 @@ fun AppFilterChip(selected: Boolean, onClick: () -> Unit, label: String) {
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label, fontSize = 14.sp) },
+        label = { Text(label, fontSize = 13.sp) },
         shape = RoundedCornerShape(20.dp),
         colors = FilterChipDefaults.filterChipColors(
             containerColor = AppColors.Card,
@@ -55,40 +57,29 @@ fun AppFilterChip(selected: Boolean, onClick: () -> Unit, label: String) {
 }
 
 @Composable
-fun PrimaryButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = AppColors.Accent,
-            contentColor = Color.White
-        ),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+fun CircleIconButton(
+    icon: ImageVector,
+    onClick: () -> Unit,
+    filled: Boolean = false
+) {
+    val bg = if (filled) AppColors.Accent else AppColors.Card
+    val fg = if (filled) Color.White else AppColors.Accent
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
     ) {
-        if (icon != null) {
-            Icon(icon, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
+        Surface(
+            color = bg,
+            shape = CircleShape,
+            border = BorderStroke(1.dp, if (filled) AppColors.Accent else AppColors.Border),
+            modifier = Modifier.size(42.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = fg, modifier = Modifier.size(20.dp))
+            }
         }
-        Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-fun SecondaryButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = AppColors.Accent
-        ),
-        border = BorderStroke(1.dp, AppColors.Accent),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-    ) {
-        if (icon != null) {
-            Icon(icon, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -141,173 +132,204 @@ fun TodayScreen() {
         }
     }
 
-    val df = remember { SimpleDateFormat("EEEE, d MMMM", Locale("ru")) }
+    val dfDate = remember { SimpleDateFormat("EEEE, d MMMM", Locale("ru")) }
+    val dfTime = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dayName = ScheduleStore.dayNameRu()
     val group = ScheduleStore.group(ctx)
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        // ── Погода ──
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+
+        // ── Компактная карточка погоды ──
         Card(
             colors = CardDefaults.cardColors(containerColor = AppColors.Card),
             shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, AppColors.Border),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    df.format(now).replaceFirstChar { it.uppercase() },
-                    color = AppColors.TextPrimary, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now),
-                    color = AppColors.TextSecondary, fontSize = 14.sp
-                )
-                Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Дата/время — слева
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        dfDate.format(now).replaceFirstChar { it.uppercase() },
+                        color = AppColors.TextPrimary, fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        dfTime.format(now),
+                        color = AppColors.TextSecondary, fontSize = 12.sp
+                    )
+                }
+                // Погода — справа
                 if (weather != null) {
                     val w = weather!!
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${w.temp}°", color = AppColors.Accent,
-                            fontSize = 48.sp, fontWeight = FontWeight.Bold
+                            "${w.temp}°",
+                            color = AppColors.Accent,
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width(10.dp))
                         Column {
-                            Text(w.desc, color = AppColors.TextPrimary, fontSize = 17.sp,
-                                fontWeight = FontWeight.SemiBold)
-                            Text("Ощущается как ${w.feelsLike}°",
-                                color = AppColors.TextSecondary, fontSize = 13.sp)
+                            Text(
+                                w.desc,
+                                color = AppColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "ощущ. ${w.feelsLike}° · 💨${w.wind} · 💧${w.humidity}%",
+                                color = AppColors.TextSecondary,
+                                fontSize = 11.sp
+                            )
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Row {
-                        WeatherChip("💨 ${w.wind} м/с")
-                        Spacer(Modifier.width(8.dp))
-                        WeatherChip("💧 ${w.humidity}%")
-                        Spacer(Modifier.width(8.dp))
-                        WeatherChip("🌡 ${w.pressure} мм")
-                    }
                 } else {
-                    Text("Погода загружается…", color = AppColors.TextSecondary, fontSize = 14.sp)
+                    Text("Загрузка…", color = AppColors.TextSecondary, fontSize = 12.sp)
                 }
             }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ── Переключатель недели ──
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Неделя:", color = AppColors.TextPrimary, fontSize = 15.sp)
-            Spacer(Modifier.width(8.dp))
-            AppFilterChip(
-                selected = week == WeekType.ODD,
-                onClick = {
-                    week = WeekType.ODD
-                    ScheduleStore.setCurrentWeek(ctx, WeekType.ODD)
-                    Notifier.scheduleBeforePairs(ctx)
-                },
-                label = "Нечётная"
-            )
-            Spacer(Modifier.width(6.dp))
-            AppFilterChip(
-                selected = week == WeekType.EVEN,
-                onClick = {
-                    week = WeekType.EVEN
-                    ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN)
-                    Notifier.scheduleBeforePairs(ctx)
-                },
-                label = "Чётная"
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ── Кнопки ──
-        Column {
-            Row {
-                PrimaryButton("Загрузить .xlsx", Icons.Default.Upload) {
-                    picker.launch(arrayOf(
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        "application/vnd.ms-excel", "*/*"
-                    ))
-                }
-                Spacer(Modifier.width(8.dp))
-                SecondaryButton("Обновить", Icons.Default.Refresh) {
-                    scope.launch {
-                        weather = Weather.fetch()
-                        Notifier.scheduleBeforePairs(ctx)
-                        status = "Обновлено"
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            // Кнопка «Скачать расписание» → сайт колледжа
-            SecondaryButton("Скачать расписание", Icons.Default.Download) {
-                try {
-                    val host = IDN.toASCII("споспк.рф")
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://$host/"))
-                    ctx.startActivity(intent)
-                } catch (_: Exception) { }
-            }
-        }
-
-        if (status.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(status, color = AppColors.Accent, fontSize = 13.sp)
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ── Заголовок дня ──
-        Text(
-            "$dayName (${if (week == WeekType.EVEN) "чётная" else "нечётная"})",
-            color = AppColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold
-        )
-        if (group.isNotEmpty()) {
-            Text("Группа $group", color = AppColors.TextSecondary, fontSize = 13.sp)
         }
 
         Spacer(Modifier.height(10.dp))
 
-        if (pairs.isEmpty()) {
-            Box(
-                Modifier.fillMaxWidth().padding(top = 40.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.CheckCircle, null,
-                        tint = AppColors.Accent, modifier = Modifier.size(48.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text("Пар нет", color = AppColors.TextSecondary, fontSize = 16.sp)
-                }
-            }
-        } else {
-            LazyColumn {
-                items(pairs) { p ->
-                    val key = "${p.group}|${p.day}|${p.week}|${p.number}"
-                    PairCard(
-                        p = p,
-                        isFavorite = key in favorites,
-                        note = ScheduleStore.getNote(ctx, key),
-                        onToggleFavorite = {
-                            ScheduleStore.toggleFavorite(ctx, key)
-                            favorites = ScheduleStore.favorites(ctx)
-                        }
+        // ── Заголовок дня ──
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                dayName,
+                color = AppColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "(${if (week == WeekType.EVEN) "чётная" else "нечётная"})",
+                color = AppColors.TextSecondary, fontSize = 13.sp,
+                modifier = Modifier.padding(bottom = 2.dp)
+            )
+            Spacer(Modifier.weight(1f))
+            if (group.isNotEmpty()) {
+                Surface(
+                    color = AppColors.AccentSoft,
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(
+                        group,
+                        color = AppColors.Accent, fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                     )
                 }
             }
         }
-    }
-}
 
-@Composable
-fun WeatherChip(text: String) {
-    Surface(
-        color = AppColors.CardElevated,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, AppColors.Border)
-    ) {
-        Text(text, color = AppColors.TextSecondary, fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // ── Расписание (основная часть экрана) ──
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (pairs.isEmpty()) {
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.CheckCircle, null,
+                            tint = AppColors.Accent,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("Пар нет 🎉", color = AppColors.TextSecondary, fontSize = 16.sp)
+                    }
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(pairs) { p ->
+                        val key = "${p.group}|${p.day}|${p.week}|${p.number}"
+                        PairCard(
+                            p = p,
+                            isFavorite = key in favorites,
+                            note = ScheduleStore.getNote(ctx, key),
+                            onToggleFavorite = {
+                                ScheduleStore.toggleFavorite(ctx, key)
+                                favorites = ScheduleStore.favorites(ctx)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Нижняя панель: неделя слева, кнопки справа ──
+        Column {
+            if (status.isNotEmpty()) {
+                Text(
+                    status, color = AppColors.Accent, fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Слева — выбор недели
+                AppFilterChip(
+                    selected = week == WeekType.ODD,
+                    onClick = {
+                        week = WeekType.ODD
+                        ScheduleStore.setCurrentWeek(ctx, WeekType.ODD)
+                        Notifier.scheduleBeforePairs(ctx)
+                    },
+                    label = "Нечётная"
+                )
+                Spacer(Modifier.width(4.dp))
+                AppFilterChip(
+                    selected = week == WeekType.EVEN,
+                    onClick = {
+                        week = WeekType.EVEN
+                        ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN)
+                        Notifier.scheduleBeforePairs(ctx)
+                    },
+                    label = "Чётная"
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                // Справа — кнопки действий
+                CircleIconButton(
+                    icon = Icons.Default.Upload,
+                    filled = true,
+                    onClick = {
+                        picker.launch(arrayOf(
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel", "*/*"
+                        ))
+                    }
+                )
+                Spacer(Modifier.width(4.dp))
+                CircleIconButton(
+                    icon = Icons.Default.Refresh,
+                    onClick = {
+                        scope.launch {
+                            weather = Weather.fetch()
+                            Notifier.scheduleBeforePairs(ctx)
+                            status = "Обновлено"
+                        }
+                    }
+                )
+                Spacer(Modifier.width(4.dp))
+                CircleIconButton(
+                    icon = Icons.Default.Download,
+                    onClick = {
+                        try {
+                            val host = IDN.toASCII("споспк.рф")
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://$host/"))
+                            ctx.startActivity(intent)
+                        } catch (_: Exception) { }
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -606,7 +628,7 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(24.dp))
 
-        // ⚙️ DEBUG — долгое нажатие 5 секунд
+        // ⚙️ DEBUG — долгое нажатие 5 секунд (без подсказки)
         Surface(
             color = Color.Transparent,
             modifier = Modifier
@@ -624,17 +646,12 @@ fun SettingsScreen() {
                     )
                 }
         ) {
-            Column(Modifier.padding(vertical = 12.dp)) {
-                Text(
-                    text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
-                    color = if (debugMode) AppColors.Accent else AppColors.TextDim,
-                    fontSize = 12.sp
-                )
-                Text(
-                    "Зажми на 5 сек для отладки",
-                    color = AppColors.TextDim, fontSize = 10.sp
-                )
-            }
+            Text(
+                text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
+                color = if (debugMode) AppColors.Accent else AppColors.TextDim,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 12.dp)
+            )
         }
 
         if (debugMode) {
@@ -729,7 +746,6 @@ fun PairCard(
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Номер пары — в кружочке
                 Surface(
                     color = AppColors.AccentSoft,
                     shape = RoundedCornerShape(8.dp)
