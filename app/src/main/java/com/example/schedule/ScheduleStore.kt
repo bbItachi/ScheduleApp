@@ -8,6 +8,14 @@ import java.util.Calendar
 
 data class Bell(val number: Int, val start: String, val end: String, val breakBefore: Int)
 
+private data class BellCandidate(
+    val num: Int,
+    val startStr: String,
+    val endStr: String,
+    val startMin: Int,
+    val endMin: Int
+)
+
 object ScheduleStore {
     private const val FILE = "schedule.json"
     private const val NOTES_FILE = "notes.json"
@@ -201,8 +209,8 @@ object ScheduleStore {
 
     fun bells(ctx: Context): List<Bell> {
         val all = load(ctx)?.pairs ?: return emptyList()
-        // Группируем по номеру пары и берём первое время (одинаковое у всех групп)
-        val byNumber = all
+
+        val candidates = all
             .filter { it.time.contains("-") }
             .groupBy { it.number }
             .mapNotNull { (num, list) ->
@@ -211,21 +219,16 @@ object ScheduleStore {
                 val endStr = time.substringAfter("-").trim()
                 val startMin = timeToMinutes(startStr) ?: return@mapNotNull null
                 val endMin = timeToMinutes(endStr) ?: return@mapNotNull null
-                Triple(num, startStr, endStr) to startMin to endMin
+                BellCandidate(num, startStr, endStr, startMin, endMin)
             }
-            .sortedBy { it.first.first }
+            .sortedBy { it.num }
 
         val result = mutableListOf<Bell>()
         var prevEnd: Int? = null
-        for (triple in byNumber) {
-            val num = triple.first.first
-            val startStr = triple.first.second
-            val endStr = triple.first.third
-            val startMin = triple.second
-            val endMin = triple.third
-            val breakMin = if (prevEnd != null) startMin - prevEnd else 0
-            result += Bell(num, startStr, endStr, breakMin)
-            prevEnd = endMin
+        for (c in candidates) {
+            val breakMin = if (prevEnd != null) c.startMin - prevEnd else 0
+            result += Bell(c.num, c.startStr, c.endStr, breakMin)
+            prevEnd = c.endMin
         }
         return result
     }
@@ -234,7 +237,6 @@ object ScheduleStore {
 
     fun lessonsByTeacher(ctx: Context, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
-        // Уникальные по (day, week, number, group) — убираем дубли из-за подгрупп
         val unique = LinkedHashMap<String, Lesson>()
         for (l in all) {
             if (!l.subgroups.any { it.teacher.contains(teacher, true) }) continue
@@ -243,9 +245,9 @@ object ScheduleStore {
         }
         return unique.values.sortedWith(
             compareBy(
-                { if (it.week == WeekType.EVEN) 0 else 1 },  // сначала чётная
-                { dayOrder(it.day) },                          // Пн..Вс
-                { it.number }                                  // по номеру пары
+                { if (it.week == WeekType.EVEN) 0 else 1 },
+                { dayOrder(it.day) },
+                { it.number }
             )
         )
     }
@@ -258,7 +260,6 @@ object ScheduleStore {
             .sorted()
     }
 
-    // Порядок дня недели: Пн=1 ... Вс=7
     fun dayOrder(day: String): Int = when (day) {
         "ПОНЕДЕЛЬНИК" -> 1
         "ВТОРНИК" -> 2
