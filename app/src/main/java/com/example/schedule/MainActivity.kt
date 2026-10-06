@@ -8,17 +8,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
@@ -36,11 +44,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun App() {
-    val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    var tab by remember { mutableStateOf(0) }
+    var dragAccum by remember { mutableStateOf(0f) }
 
     val navColors = NavigationBarItemDefaults.colors(
         selectedIconColor = AppColors.Accent,
@@ -52,16 +59,43 @@ fun App() {
 
     Surface(Modifier.fillMaxSize(), color = AppColors.Background) {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f)) {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = true
-                ) { page ->
-                    when (page) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (dragAccum < -120f && tab < 2) tab++
+                                else if (dragAccum > 120f && tab > 0) tab--
+                                dragAccum = 0f
+                            },
+                            onDragCancel = { dragAccum = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                dragAccum += dragAmount
+                            }
+                        )
+                    }
+            ) {
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        val forward = targetState > initialState
+                        val offset = if (forward) 1 else -1
+                        (slideInHorizontally(animationSpec = tween(220)) { full ->
+                            offset * full
+                        } + fadeIn(animationSpec = tween(180))) togetherWith
+                        (slideOutHorizontally(animationSpec = tween(220)) { full ->
+                            -offset * full
+                        } + fadeOut(animationSpec = tween(180)))
+                            .using(SizeTransform(clip = false))
+                    },
+                    label = "tab"
+                ) { target ->
+                    when (target) {
                         0 -> TodayScreen()
                         1 -> WeekScreen()
-                        2 -> SettingsScreen()
+                        else -> SettingsScreen()
                     }
                 }
             }
@@ -70,22 +104,19 @@ fun App() {
                 contentColor = AppColors.TextPrimary
             ) {
                 NavigationBarItem(
-                    selected = pagerState.currentPage == 0,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                    selected = tab == 0, onClick = { tab = 0 },
                     icon = { Icon(Icons.Default.Home, null) },
                     label = { Text("Сегодня") },
                     colors = navColors
                 )
                 NavigationBarItem(
-                    selected = pagerState.currentPage == 1,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                    selected = tab == 1, onClick = { tab = 1 },
                     icon = { Icon(Icons.Default.DateRange, null) },
                     label = { Text("Неделя") },
                     colors = navColors
                 )
                 NavigationBarItem(
-                    selected = pagerState.currentPage == 2,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
+                    selected = tab == 2, onClick = { tab = 2 },
                     icon = { Icon(Icons.Default.Settings, null) },
                     label = { Text("Настройки") },
                     colors = navColors
