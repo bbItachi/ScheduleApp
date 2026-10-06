@@ -15,6 +15,7 @@ data class SubgroupPair(
 
 @Serializable
 data class Lesson(
+    val group: String,
     val number: Int,
     val time: String,
     val day: String,
@@ -26,4 +27,11 @@ data class Lesson(
 data class SavedSchedule(
     val pairs: List<Lesson>,
     val importedAt: Long
+)
+
+@Serializable
+data class Note(
+    val key: String,
+    val text: String,
+    val createdAt: Long
 )
