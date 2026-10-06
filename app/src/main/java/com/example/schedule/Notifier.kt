@@ -10,8 +10,7 @@ object Notifier {
 
     private const val CH_MORNING = "morning"
     private const val CH_BEFORE = "before"
-    private const val DAYS_AHEAD = 7          // было 30 — снижаем нагрузку в 4 раза
-    private const val MAX_REQ = 200           // было 800
+    private const val DAYS_AHEAD = 7
 
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
@@ -27,6 +26,15 @@ object Notifier {
     private fun parseStartMinutes(time: String): Pair<Int, Int>? {
         val start = time.substringBefore("-").trim().replace(':', '.')
         val parts = start.split(".")
+        if (parts.size < 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        return h to m
+    }
+
+    private fun parseEndMinutes(time: String): Pair<Int, Int>? {
+        val end = time.substringAfter("-").trim().replace(':', '.')
+        val parts = end.split(".")
         if (parts.size < 2) return null
         val h = parts[0].toIntOrNull() ?: return null
         val m = parts[1].toIntOrNull() ?: return null
@@ -56,15 +64,13 @@ object Notifier {
         }
     }
 
-    // ⚠️ Тяжёлая операция — всегда вызывать из фонового потока
     fun scheduleBeforePairs(ctx: Context) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         val group = ScheduleStore.group(ctx)
         if (group.isEmpty()) return
         val before = ScheduleStore.beforeMinutes(ctx)
 
-        // Отмена старых — только 200 ID (реально используется максимум ~100)
-        for (i in 0..MAX_REQ) {
+        for (i in 0..200) {
             val pi = PendingIntent.getBroadcast(
                 ctx, 3000 + i,
                 Intent(ctx, AlarmReceiver::class.java).apply { action = "before" },
@@ -116,6 +122,81 @@ object Notifier {
         }
     }
 
+    // ─── Планирование переключения DND на начало/конец пары ───
+
+    fun scheduleDnd(ctx: Context) {
+        val am = ctx.getSystemService(AlarmManager::class.java)
+
+        // Отменить старые (5000..5600)
+        for (i in 0..600) {
+            val pi = PendingIntent.getBroadcast(
+                ctx, 5000 + i,
+                Intent(ctx, AlarmReceiver::class.java).apply { action = "dnd_on" },
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pi != null) am.cancel(pi)
+            val pi2 = PendingIntent.getBroadcast(
+                ctx, 5700 + i,
+                Intent(ctx, AlarmReceiver::class.java).apply { action = "dnd_off" },
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pi2 != null) am.cancel(pi2)
+        }
+
+        if (!ScheduleStore.dndEnabled(ctx)) return
+        val group = ScheduleStore.group(ctx)
+        if (group.isEmpty()) return
+
+        val today = Calendar.getInstance()
+        var onCode = 5000
+        var offCode = 5700
+
+        for (dayOffset in 0 until DAYS_AHEAD) {
+            val dayCal = today.clone() as Calendar
+            dayCal.add(Calendar.DAY_OF_YEAR, dayOffset)
+            val dayName = ScheduleStore.dayNameRuFor(dayCal)
+            val week = ScheduleStore.weekFor(ctx, dayCal)
+            val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
+
+            for (pair in pairs) {
+                val start = parseStartMinutes(pair.time) ?: continue
+                val end = parseEndMinutes(pair.time) ?: continue
+
+                val startCal = dayCal.clone() as Calendar
+                startCal.set(Calendar.HOUR_OF_DAY, start.first)
+                startCal.set(Calendar.MINUTE, start.second)
+                startCal.set(Calendar.SECOND, 0)
+                startCal.set(Calendar.MILLISECOND, 0)
+
+                if (startCal.timeInMillis > System.currentTimeMillis()) {
+                    val pi = PendingIntent.getBroadcast(
+                        ctx, onCode++,
+                        Intent(ctx, AlarmReceiver::class.java).apply { action = "dnd_on" },
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    try { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pi) }
+                    catch (_: SecurityException) { am.set(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pi) }
+                }
+
+                val endCal = dayCal.clone() as Calendar
+                endCal.set(Calendar.HOUR_OF_DAY, end.first)
+                endCal.set(Calendar.MINUTE, end.second)
+                endCal.set(Calendar.SECOND, 0)
+                endCal.set(Calendar.MILLISECOND, 0)
+
+                if (endCal.timeInMillis > System.currentTimeMillis()) {
+                    val pi = PendingIntent.getBroadcast(
+                        ctx, offCode++,
+                        Intent(ctx, AlarmReceiver::class.java).apply { action = "dnd_off" },
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    try { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pi) }
+                    catch (_: SecurityException) { am.set(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pi) }
+                }
+            }
+        }
+    }
+
     class AlarmReceiver : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             ensureChannels(ctx)
@@ -137,7 +218,6 @@ object Notifier {
                         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                         .setAutoCancel(true)
                         .build())
-                    // Перепланировать через background-thread через WorkManager
                     scheduleMorning(ctx)
                 }
                 "before" -> {
@@ -155,6 +235,20 @@ object Notifier {
                             .bigText("$subject\nАудитория: $room\nПреподаватель: $teacher\nВремя: $time"))
                         .setAutoCancel(true)
                         .build())
+                }
+                "dnd_on" -> {
+                    if (ScheduleStore.dndEnabled(ctx)) {
+                        try {
+                            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                        } catch (_: SecurityException) { }
+                    }
+                }
+                "dnd_off" -> {
+                    if (ScheduleStore.dndEnabled(ctx)) {
+                        try {
+                            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                        } catch (_: SecurityException) { }
+                    }
                 }
             }
         }
