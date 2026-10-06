@@ -99,6 +99,11 @@ fun TodayScreen() {
     var now by remember { mutableStateOf(Date()) }
     var favorites by remember { mutableStateOf(ScheduleStore.favorites(ctx)) }
 
+    // Состояние диалога выбора группы после импорта
+    var showImportGroupPicker by remember { mutableStateOf(false) }
+    var importGroups by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingParsed by remember { mutableStateOf<List<Lesson>>(emptyList()) }
+
     EnsureNotificationPermission()
 
     LaunchedEffect(week) {
@@ -107,6 +112,61 @@ fun TodayScreen() {
     LaunchedEffect(Unit) { weather = Weather.fetch() }
     LaunchedEffect(Unit) {
         while (true) { now = Date(); kotlinx.coroutines.delay(1000) }
+    }
+
+    // ── Диалог выбора группы после загрузки файла ──
+    if (showImportGroupPicker) {
+        AlertDialog(
+            onDismissRequest = { showImportGroupPicker = false },
+            title = { Text("Выбор группы", color = AppColors.TextPrimary) },
+            text = {
+                Column {
+                    Text(
+                        "Найдено групп: ${importGroups.size}. Выбери свою — покажу её расписание.",
+                        color = AppColors.TextSecondary, fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                        items(importGroups) { g ->
+                            val current = ScheduleStore.group(ctx)
+                            Surface(
+                                color = if (g == current) AppColors.AccentSoft else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        ScheduleStore.setGroup(ctx, g)
+                                        ScheduleStore.save(ctx, pendingParsed)
+                                        pairs = ScheduleStore.pairsFor(
+                                            ctx, ScheduleStore.dayNameRu(), week
+                                        )
+                                        status = "Выбрана группа $g, пар: ${pendingParsed.size}"
+                                        Notifier.scheduleBeforePairs(ctx)
+                                        showImportGroupPicker = false
+                                    }
+                            ) {
+                                Text(
+                                    g,
+                                    color = if (g == current) AppColors.Accent else AppColors.TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(
+                                        horizontal = 12.dp, vertical = 10.dp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showImportGroupPicker = false }) {
+                    Text("Отмена", color = AppColors.TextSecondary)
+                }
+            },
+            containerColor = AppColors.Card
+        )
     }
 
     val picker = rememberLauncherForActivityResult(
@@ -119,13 +179,25 @@ fun TodayScreen() {
                 val parsed = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)!!.use { XlsxParser.parse(it) }
                 }
-                ScheduleStore.save(ctx, parsed)
-                if (ScheduleStore.group(ctx).isEmpty()) {
-                    ScheduleStore.setGroup(ctx, ScheduleStore.allGroups(ctx).firstOrNull() ?: "")
+                // Уникальные группы из файла
+                val groupsInFile = parsed.map { it.group }.distinct().sorted()
+
+                if (groupsInFile.isEmpty()) {
+                    status = "В файле не найдено ни одной группы"
+                } else if (groupsInFile.size == 1) {
+                    // Только одна группа — сразу применяем
+                    ScheduleStore.save(ctx, parsed)
+                    ScheduleStore.setGroup(ctx, groupsInFile[0])
+                    pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
+                    status = "Загружено пар: ${parsed.size}, группа: ${groupsInFile[0]}"
+                    Notifier.scheduleBeforePairs(ctx)
+                } else {
+                    // Несколько — показываем диалог
+                    pendingParsed = parsed
+                    importGroups = groupsInFile
+                    showImportGroupPicker = true
+                    status = "Найдено групп: ${groupsInFile.size}. Выбери свою."
                 }
-                pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
-                status = "Загружено пар: ${parsed.size}, групп: ${ScheduleStore.allGroups(ctx).size}"
-                Notifier.scheduleBeforePairs(ctx)
             } catch (e: Exception) {
                 status = "Ошибка: ${e.message}"
             }
@@ -501,7 +573,6 @@ fun SettingsScreen() {
     var debugMode by remember { mutableStateOf(false) }
     var totalPairs by remember { mutableStateOf(0) }
 
-    // Статусы разрешений (перечитываются при заходе и после нажатий)
     var batteryOk by remember { mutableStateOf(PermissionsHelper.isBatteryOptimizationIgnored(ctx)) }
     var exactAlarmOk by remember { mutableStateOf(PermissionsHelper.hasExactAlarmPermission(ctx)) }
 
@@ -554,10 +625,7 @@ fun SettingsScreen() {
 
         LazyColumn(Modifier.fillMaxSize()) {
 
-            // ═══ Блок: Основное ═══
-            item {
-                SectionTitle("Основное")
-            }
+            item { SectionTitle("Основное") }
             item {
                 SettingRow(
                     title = "Группа",
@@ -633,7 +701,6 @@ fun SettingsScreen() {
                 Divider(color = AppColors.Divider)
             }
 
-            // ═══ Блок: Разрешения и фоновая работа ═══
             item {
                 Spacer(Modifier.height(16.dp))
                 SectionTitle("Разрешения и фоновая работа")
@@ -651,9 +718,7 @@ fun SettingsScreen() {
                     title = "Точные будильники",
                     subtitle = if (exactAlarmOk) "Разрешены" else "Разрешите для точного времени",
                     ok = exactAlarmOk,
-                    onClick = {
-                        PermissionsHelper.openExactAlarmSettings(ctx)
-                    }
+                    onClick = { PermissionsHelper.openExactAlarmSettings(ctx) }
                 )
             }
             item {
@@ -661,9 +726,7 @@ fun SettingsScreen() {
                     title = "Батарея без ограничений",
                     subtitle = if (batteryOk) "Система не будет усыплять" else "Отключите оптимизацию батареи",
                     ok = batteryOk,
-                    onClick = {
-                        PermissionsHelper.openBatteryOptimizationSettings(ctx)
-                    }
+                    onClick = { PermissionsHelper.openBatteryOptimizationSettings(ctx) }
                 )
             }
             item {
@@ -683,7 +746,6 @@ fun SettingsScreen() {
                 )
             }
             item {
-                // Кнопка «Перепланировать все уведомления»
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
@@ -701,7 +763,6 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(16.dp))
             }
 
-            // ═══ Блок: Debug ═══
             item {
                 Surface(
                     color = Color.Transparent,
@@ -721,7 +782,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
+                        text = "Версия 1.1" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
