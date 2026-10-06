@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -239,6 +241,59 @@ fun SkeletonList() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  ДИАЛОГ ПРЕПОДАВАТЕЛЯ
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+fun TeacherDialog(teacher: String, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val lessons = remember(teacher) { ScheduleStore.lessonsByTeacher(ctx, teacher) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(teacher, color = AppColors.TextPrimary, fontSize = 16.sp) },
+        text = {
+            if (lessons.isEmpty()) {
+                Text("Нет пар", color = AppColors.TextSecondary)
+            } else {
+                LazyColumn(Modifier.heightIn(max = 500.dp)) {
+                    itemsIndexed(
+                        items = lessons,
+                        key = { index, _ -> "lesson_$index" }
+                    ) { _, l ->
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            val weekLabel = if (l.week == WeekType.EVEN) "чёт" else "нечёт"
+                            Text(
+                                "${l.day} · $weekLabel · ${l.number} пара",
+                                color = AppColors.Accent, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            val subj = l.subgroups
+                                .firstOrNull { it.teacher.contains(teacher, true) }
+                                ?.subject
+                                ?: l.subgroups.firstOrNull()?.subject ?: ""
+                            Text(subj, color = AppColors.TextPrimary, fontSize = 13.sp)
+                            val room = l.subgroups.firstOrNull()?.room ?: "—"
+                            Text(
+                                "${l.time} · ауд. $room · гр. ${l.group}",
+                                color = AppColors.TextSecondary, fontSize = 12.sp
+                            )
+                        }
+                        Divider(color = AppColors.Divider)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть", color = AppColors.Accent)
+            }
+        },
+        containerColor = AppColors.Card
+    )
+}
+
+// ═══════════════════════════════════════════════════════════
 //  ЭКРАН «СЕГОДНЯ»
 // ═══════════════════════════════════════════════════════════
 
@@ -272,47 +327,7 @@ fun TodayScreen() {
         weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
     }
 
-    // ─── Диалог со всеми парами преподавателя ───
-    teacherDialog?.let { teacher ->
-        val teacherLessons = ScheduleStore.lessonsByTeacher(ctx, teacher)
-        AlertDialog(
-            onDismissRequest = { teacherDialog = null },
-            title = { Text(teacher, color = AppColors.TextPrimary, fontSize = 16.sp) },
-            text = {
-                if (teacherLessons.isEmpty()) {
-                    Text("Нет пар", color = AppColors.TextSecondary)
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 500.dp)) {
-                        items(teacherLessons) { l ->
-                            Column(Modifier.padding(vertical = 6.dp)) {
-                                Text(
-                                    "${l.day} · ${l.week.name.let { if (it == "EVEN") "чёт" else "нечёт" }} · ${l.number} пара",
-                                    color = AppColors.Accent, fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    l.subgroups.firstOrNull { it.teacher.contains(teacher, true) }?.subject
-                                        ?: l.subgroups.firstOrNull()?.subject ?: "",
-                                    color = AppColors.TextPrimary, fontSize = 13.sp
-                                )
-                                Text(
-                                    "${l.time} · ауд. ${l.subgroups.firstOrNull()?.room ?: "—"} · гр. ${l.group}",
-                                    color = AppColors.TextSecondary, fontSize = 12.sp
-                                )
-                            }
-                            Divider(color = AppColors.Divider)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { teacherDialog = null }) {
-                    Text("Закрыть", color = AppColors.Accent)
-                }
-            },
-            containerColor = AppColors.Card
-        )
-    }
+    teacherDialog?.let { TeacherDialog(it) { teacherDialog = null } }
 
     if (showImportGroupPicker) {
         AlertDialog(
@@ -623,46 +638,7 @@ fun WeekScreen() {
         }
     }
 
-    teacherDialog?.let { teacher ->
-        val teacherLessons = ScheduleStore.lessonsByTeacher(ctx, teacher)
-        AlertDialog(
-            onDismissRequest = { teacherDialog = null },
-            title = { Text(teacher, color = AppColors.TextPrimary, fontSize = 16.sp) },
-            text = {
-                if (teacherLessons.isEmpty()) {
-                    Text("Нет пар", color = AppColors.TextSecondary)
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 500.dp)) {
-                        items(teacherLessons) { l ->
-                            Column(Modifier.padding(vertical = 6.dp)) {
-                                Text(
-                                    "${l.day} · ${l.week.name.let { if (it == "EVEN") "чёт" else "нечёт" }} · ${l.number} пара",
-                                    color = AppColors.Accent, fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    l.subgroups.firstOrNull { it.teacher.contains(teacher, true) }?.subject
-                                        ?: l.subgroups.firstOrNull()?.subject ?: "",
-                                    color = AppColors.TextPrimary, fontSize = 13.sp
-                                )
-                                Text(
-                                    "${l.time} · ауд. ${l.subgroups.firstOrNull()?.room ?: "—"} · гр. ${l.group}",
-                                    color = AppColors.TextSecondary, fontSize = 12.sp
-                                )
-                            }
-                            Divider(color = AppColors.Divider)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { teacherDialog = null }) {
-                    Text("Закрыть", color = AppColors.Accent)
-                }
-            },
-            containerColor = AppColors.Card
-        )
-    }
+    teacherDialog?.let { TeacherDialog(it) { teacherDialog = null } }
 
     val days = listOf("ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА")
 
@@ -827,9 +803,14 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 fun BellsScreen() {
     val ctx = LocalContext.current
     var bells by remember { mutableStateOf<List<Bell>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        bells = withContext(Dispatchers.IO) { ScheduleStore.bells(ctx) }
+        try {
+            bells = withContext(Dispatchers.IO) { ScheduleStore.bells(ctx) }
+        } catch (e: Exception) {
+            loadError = e.message
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -839,26 +820,37 @@ fun BellsScreen() {
         Text("Из твоего расписания", color = AppColors.TextSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(14.dp))
 
-        if (bells.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Alarm, null,
-                        tint = AppColors.TextDim,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text("Сначала загрузи .xlsx на вкладке «Сегодня»",
-                        color = AppColors.TextSecondary, fontSize = 14.sp,
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        when {
+            loadError != null -> {
+                Text("Ошибка: $loadError", color = AppColors.Accent, fontSize = 14.sp)
+            }
+            bells.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Alarm, null,
+                            tint = AppColors.TextDim,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Сначала загрузи .xlsx на вкладке «Сегодня»",
+                            color = AppColors.TextSecondary, fontSize = 14.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                    }
                 }
             }
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(bells, key = { it.number }) { b ->
-                    BellRow(b)
-                    Spacer(Modifier.height(6.dp))
+            else -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    itemsIndexed(
+                        items = bells,
+                        key = { index, b -> "bell_${b.number}_$index" }
+                    ) { _, b ->
+                        BellRow(b)
+                        Spacer(Modifier.height(6.dp))
+                    }
                 }
             }
         }
@@ -898,7 +890,7 @@ fun BellRow(b: Bell) {
                 val dur = run {
                     val s = parseStartMinutes(b.start) ?: 0
                     val e = parseEndMinutes(b.end) ?: 0
-                    e - s
+                    if (e > s) e - s else 0
                 }
                 Text("$dur мин", color = AppColors.TextSecondary, fontSize = 12.sp)
             }
@@ -1053,7 +1045,6 @@ fun SettingsScreen() {
                 Divider(color = AppColors.Divider)
             }
 
-            // ─── Режим «Не беспокоить» ───
             item(key = "sec_dnd") {
                 Spacer(Modifier.height(16.dp))
                 SectionTitle("Не беспокоить")
