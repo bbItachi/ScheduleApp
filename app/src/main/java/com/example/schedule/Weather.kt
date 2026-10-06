@@ -3,41 +3,76 @@ package com.example.schedule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
 object Weather {
 
-    // Северск, Томская область
-    private const val CITY = "Северск"
+    // Ключ Яндекс.Погоды
+    private const val YANDEX_KEY = "7361d265-d0b7-4f40-bd3a-68723050133a"
 
-    data class Info(val temp: Int, val wind: Int, val desc: String)
+    // Северск, Томская область
+    private const val LAT = 56.6003
+    private const val LON = 84.8503
+
+    data class Info(
+        val temp: Int,
+        val feelsLike: Int,
+        val wind: Double,
+        val humidity: Int,
+        val pressure: Int,
+        val desc: String
+    )
 
     suspend fun fetch(): Info? = withContext(Dispatchers.IO) {
         try {
-            val cityEncoded = URLEncoder.encode(CITY, "UTF-8")
-            val url = URL("https://wttr.in/$cityEncoded?format=j1&lang=ru")
+            val url = URL(
+                "https://api.weather.yandex.ru/v2/forecast" +
+                "?lat=$LAT&lon=$LON&lang=ru_RU&limit=1&hours=false"
+            )
             val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "curl/8.0")
+            conn.setRequestProperty("X-Yandex-Weather-Key", YANDEX_KEY)
+
             val text = conn.inputStream.bufferedReader().use { it.readText() }
-
             val root = Json.parseToJsonElement(text).jsonObject
-            val current = root["current_condition"]!!.jsonArray[0].jsonObject
-            val temp = current["temp_C"]!!.jsonPrimitive.content.toInt()
-            val wind = current["windspeedKmph"]!!.jsonPrimitive.content.toInt()
-            val descList = current["lang_ru"]?.jsonArray
-            val desc = if (descList != null && descList.isNotEmpty())
-                descList[0].jsonObject["value"]!!.jsonPrimitive.content
-            else
-                current["weatherDesc"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content
+            val fact = root["fact"]!!.jsonObject
 
-            Info(temp, wind, desc)
+            Info(
+                temp = fact["temp"]!!.jsonPrimitive.content.toInt(),
+                feelsLike = fact["feels_like"]!!.jsonPrimitive.content.toInt(),
+                wind = fact["wind_speed"]!!.jsonPrimitive.content.toDouble(),
+                humidity = fact["humidity"]!!.jsonPrimitive.content.toInt(),
+                pressure = fact["pressure_mm"]!!.jsonPrimitive.content.toInt(),
+                desc = describe(fact["condition"]!!.jsonPrimitive.content)
+            )
         } catch (_: Exception) { null }
+    }
+
+    private fun describe(code: String) = when (code) {
+        "clear" -> "Ясно ☀️"
+        "partly-cloudy" -> "Малооблачно 🌤"
+        "cloudy" -> "Облачно ☁️"
+        "overcast" -> "Пасмурно ☁️"
+        "drizzle" -> "Морось 🌦"
+        "light-rain" -> "Небольшой дождь 🌧"
+        "rain" -> "Дождь 🌧"
+        "moderate-rain" -> "Умеренный дождь 🌧"
+        "heavy-rain" -> "Сильный дождь 🌧"
+        "continuous-heavy-rain" -> "Затяжной дождь 🌧"
+        "showers" -> "Ливень 🌧"
+        "wet-snow" -> "Мокрый снег 🌨"
+        "light-snow" -> "Небольшой снег 🌨"
+        "snow" -> "Снег ❄️"
+        "snow-showers" -> "Снегопад 🌨"
+        "hail" -> "Град 🌨"
+        "thunderstorm" -> "Гроза ⛈"
+        "thunderstorm-with-rain" -> "Гроза с дождём ⛈"
+        "thunderstorm-with-hail" -> "Гроза с градом ⛈"
+        else -> code
     }
 }
