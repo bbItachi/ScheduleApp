@@ -12,7 +12,7 @@ object XlsxParser {
         "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"
     )
 
-    fun parse(input: InputStream, targetGroup: String): List<Lesson> {
+    fun parse(input: InputStream): List<Lesson> {
         var sharedStrings = emptyList<String>()
         var sheetXml: String? = null
 
@@ -29,81 +29,94 @@ object XlsxParser {
         }
 
         if (sheetXml == null) error("Не найден лист расписания")
-
         val cells = parseSheet(sheetXml!!, sharedStrings)
         if (cells.isEmpty()) error("Лист пустой")
 
-        val anchor = cells.entries.firstOrNull { it.value.trim() == targetGroup }
-            ?: error("Группа $targetGroup не найдена в файле")
-
-        val groupRow = rowOf(anchor.key)
-        val groupCol = colOf(anchor.key)
-
         val maxRow = cells.keys.maxOf { rowOf(it) }
         val maxCol = cells.keys.maxOf { colOf(it) }
+
+        var groupRow = -1
+        for (r in 1..maxRow) {
+            for (c in 1..maxCol) {
+                val v = cell(cells, r, c).trim()
+                if (v.equals("Группа:", true) || v.equals("Группа", true)) {
+                    groupRow = r; break
+                }
+            }
+            if (groupRow > 0) break
+        }
+        if (groupRow < 0) error("Не найдена строка с группами")
+
+        val groups = mutableListOf<Pair<Int, String>>()
+        for (c in 1..maxCol) {
+            val v = cell(cells, groupRow, c).trim()
+            if (v.isEmpty()) continue
+            if (v.equals("Группа:", true) || v == "Группа") continue
+            if (v.equals("Подгруппа:", true)) continue
+            if (!v.any { it.isLetter() }) continue
+            if (v.length < 3 || v.length > 40) continue
+            groups += c to v
+        }
+        if (groups.isEmpty()) error("Группы не найдены")
 
         val result = mutableListOf<Lesson>()
         var currentDay: String? = null
         var week = WeekType.ODD
 
-        var r = groupRow + 1
-        while (r <= maxRow) {
-            // Проверяем ВСЕ колонки в строке на "ЧЕТНАЯ"
-            var foundEven = false
+        for (r in (groupRow + 1)..maxRow) {
             for (c in 1..maxCol) {
                 val v = cell(cells, r, c)
-                if (v.contains("ЧЕТНАЯ", ignoreCase = true) ||
-                    v.contains("ЧЁТНАЯ", ignoreCase = true)) {
-                    foundEven = true
-                    break
+                if (v.contains("ЧЕТНАЯ", true) || v.contains("ЧЁТНАЯ", true)) {
+                    week = WeekType.EVEN; break
                 }
             }
-            if (foundEven) week = WeekType.EVEN
 
-            // День недели ищем в колонках A, B, C
             for (c in 1..3) {
                 val v = cell(cells, r, c).trim().uppercase()
                 if (v in DAYS) { currentDay = v; break }
             }
 
             val pairNum = cell(cells, r, 2).trim().toIntOrNull()
+            if (pairNum == null || currentDay == null) continue
+            val time = cell(cells, r, 4).trim()
+            if (time.isEmpty()) continue
 
-            if (pairNum != null && currentDay != null) {
-                val time = cell(cells, r, 4).trim()
+            for (i in groups.indices) {
+                val (colStart, groupName) = groups[i]
+                val nextCol = groups.getOrNull(i + 1)?.first ?: (colStart + 4)
+                val span = (nextCol - colStart).coerceAtMost(4)
 
-                val s1 = cell(cells, r, groupCol).trim()
-                val r1 = cell(cells, r, groupCol + 1).trim()
-                val s2 = cell(cells, r, groupCol + 2).trim()
-                val r2 = cell(cells, r, groupCol + 3).trim()
+                val s1 = cell(cells, r, colStart).trim()
+                val r1 = cell(cells, r, colStart + 1).trim()
+                val t1 = cell(cells, r + 1, colStart).trim()
+                val tr1 = cell(cells, r + 1, colStart + 1).trim()
 
-                val t1 = cell(cells, r + 1, groupCol).trim()
-                val tr1 = cell(cells, r + 1, groupCol + 1).trim()
-                val t2 = cell(cells, r + 1, groupCol + 2).trim()
-                val tr2 = cell(cells, r + 1, groupCol + 3).trim()
+                val s2 = if (span >= 4) cell(cells, r, colStart + 2).trim() else ""
+                val r2 = if (span >= 4) cell(cells, r, colStart + 3).trim() else ""
+                val t2 = if (span >= 4) cell(cells, r + 1, colStart + 2).trim() else ""
+                val tr2 = if (span >= 4) cell(cells, r + 1, colStart + 3).trim() else ""
 
                 val subs = mutableListOf<SubgroupPair>()
                 when {
                     s1.isNotEmpty() && s2.isNotEmpty() -> {
-                        subs += SubgroupPair(1, s1, t1, r1.ifEmpty { tr1 })
-                        subs += SubgroupPair(2, s2, t2, r2.ifEmpty { tr2 })
+                        subs += SubgroupPair(1, s1, t1.ifEmpty { tr1 }, r1.ifEmpty { tr1 })
+                        subs += SubgroupPair(2, s2, t2.ifEmpty { tr2 }, r2.ifEmpty { tr2 })
                     }
                     s1.isNotEmpty() -> {
-                        val room = r1.ifEmpty { r2 }.ifEmpty { tr1 }.ifEmpty { tr2 }
-                        val teacher = t1.ifEmpty { t2 }
+                        val room = r1.ifEmpty { tr1 }
+                        val teacher = t1.ifEmpty { tr1 }
                         subs += SubgroupPair(1, s1, teacher, room)
                     }
                     s2.isNotEmpty() -> {
-                        val room = r2.ifEmpty { r1 }.ifEmpty { tr2 }.ifEmpty { tr1 }
-                        val teacher = t2.ifEmpty { t1 }
+                        val room = r2.ifEmpty { tr2 }
+                        val teacher = t2.ifEmpty { tr2 }
                         subs += SubgroupPair(2, s2, teacher, room)
                     }
                 }
-
                 if (subs.isNotEmpty()) {
-                    result += Lesson(pairNum, time, currentDay, week, subs)
+                    result += Lesson(groupName, pairNum, time, currentDay!!, week, subs)
                 }
             }
-            r++
         }
         return result
     }
@@ -115,9 +128,7 @@ object XlsxParser {
         return (0 until sis.length).map { i ->
             val si = sis.item(i) as Element
             val ts = si.getElementsByTagName("t")
-            buildString {
-                for (j in 0 until ts.length) append(ts.item(j).textContent)
-            }
+            buildString { for (j in 0 until ts.length) append(ts.item(j).textContent) }
         }
     }
 
@@ -139,29 +150,17 @@ object XlsxParser {
         return map
     }
 
-    private fun rowOf(ref: String): Int =
-        ref.dropWhile { !it.isDigit() }.toIntOrNull() ?: 0
-
+    private fun rowOf(ref: String): Int = ref.dropWhile { !it.isDigit() }.toIntOrNull() ?: 0
     private fun colOf(ref: String): Int {
         var n = 0
-        for (c in ref) {
-            if (c.isDigit()) break
-            n = n * 26 + (c.uppercaseChar() - 'A' + 1)
-        }
+        for (c in ref) { if (c.isDigit()) break; n = n * 26 + (c.uppercaseChar() - 'A' + 1) }
         return n
     }
-
     private fun colLetter(col: Int): String {
-        var n = col
-        val sb = StringBuilder()
-        while (n > 0) {
-            n--
-            sb.insert(0, ('A' + (n % 26)))
-            n /= 26
-        }
+        var n = col; val sb = StringBuilder()
+        while (n > 0) { n--; sb.insert(0, ('A' + (n % 26))); n /= 26 }
         return sb.toString()
     }
-
     private fun cell(cells: Map<String, String>, row: Int, col: Int): String =
         cells[colLetter(col) + row] ?: ""
 }
