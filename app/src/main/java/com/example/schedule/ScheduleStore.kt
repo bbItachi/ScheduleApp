@@ -67,6 +67,20 @@ object ScheduleStore {
         return added
     }
 
+    // ─── Пропуск пары ───
+
+    fun skipped(ctx: Context): Set<String> =
+        prefs(ctx).getStringSet("skipped", emptySet()) ?: emptySet()
+
+    fun toggleSkipped(ctx: Context, key: String): Boolean {
+        val cur = skipped(ctx).toMutableSet()
+        val added = if (key in cur) { cur.remove(key); false } else { cur.add(key); true }
+        prefs(ctx).edit().putStringSet("skipped", cur).apply()
+        return added
+    }
+
+    // ─── Заметки ───
+
     fun notes(ctx: Context): List<Note> = try {
         val bytes = ctx.openFileInput(NOTES_FILE).use { it.readBytes() }
         json.decodeFromString(ListSerializer(Note.serializer()), bytes.decodeToString())
@@ -86,6 +100,8 @@ object ScheduleStore {
         if (text.isNotBlank()) cur.add(Note(key, text, System.currentTimeMillis()))
         saveNotes(ctx, cur)
     }
+
+    // ─── Данные ───
 
     fun pairsFor(ctx: Context, day: String, week: WeekType): List<Lesson> {
         val g = group(ctx)
