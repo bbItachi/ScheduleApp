@@ -10,6 +10,7 @@ object Notifier {
 
     private const val CH_MORNING = "morning"
     private const val CH_BEFORE = "before"
+    private const val DAYS_AHEAD = 30   // планируем на 30 дней вперёд
 
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
@@ -60,9 +61,10 @@ object Notifier {
         if (group.isEmpty()) return
         val before = ScheduleStore.beforeMinutes(ctx)
 
-        for (i in 0..200) {
+        // Отменить старые (запас 800 ID)
+        for (i in 0..800) {
             val pi = PendingIntent.getBroadcast(
-                ctx, 2000 + i,
+                ctx, 3000 + i,
                 Intent(ctx, AlarmReceiver::class.java).apply { action = "before" },
                 PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
             )
@@ -70,22 +72,24 @@ object Notifier {
         }
 
         val today = Calendar.getInstance()
-        for (dayOffset in 0..7) {
+        var reqCode = 3000
+
+        for (dayOffset in 0 until DAYS_AHEAD) {
             val dayCal = today.clone() as Calendar
             dayCal.add(Calendar.DAY_OF_YEAR, dayOffset)
             val dayName = ScheduleStore.dayNameRuFor(dayCal)
             val week = ScheduleStore.weekFor(ctx, dayCal)
             val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
 
-            pairs.forEachIndexed { idx, pair ->
-                val (ph, pm) = parseStartMinutes(pair.time) ?: return@forEachIndexed
+            pairs.forEach { pair ->
+                val (ph, pm) = parseStartMinutes(pair.time) ?: return@forEach
                 val pairCal = dayCal.clone() as Calendar
                 pairCal.set(Calendar.HOUR_OF_DAY, ph)
                 pairCal.set(Calendar.MINUTE, pm)
                 pairCal.set(Calendar.SECOND, 0)
                 pairCal.set(Calendar.MILLISECOND, 0)
                 pairCal.add(Calendar.MINUTE, -before)
-                if (pairCal.timeInMillis <= System.currentTimeMillis()) return@forEachIndexed
+                if (pairCal.timeInMillis <= System.currentTimeMillis()) return@forEach
 
                 val intent = Intent(ctx, AlarmReceiver::class.java).apply {
                     action = "before"
@@ -96,7 +100,6 @@ object Notifier {
                     putExtra("num", pair.number)
                     putExtra("before", before)
                 }
-                val reqCode = 2000 + dayOffset * 20 + idx
                 val pi = PendingIntent.getBroadcast(
                     ctx, reqCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -106,6 +109,7 @@ object Notifier {
                 } catch (_: SecurityException) {
                     am.set(AlarmManager.RTC_WAKEUP, pairCal.timeInMillis, pi)
                 }
+                reqCode++
             }
         }
     }
@@ -131,6 +135,7 @@ object Notifier {
                         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                         .setAutoCancel(true)
                         .build())
+                    // Перепланировать
                     scheduleBeforePairs(ctx)
                     scheduleMorning(ctx)
                 }
@@ -159,6 +164,7 @@ object Notifier {
             if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
                 scheduleMorning(ctx)
                 scheduleBeforePairs(ctx)
+                RescheduleWorker.schedule(ctx)
             }
         }
     }
