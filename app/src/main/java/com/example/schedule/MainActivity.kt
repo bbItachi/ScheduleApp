@@ -21,14 +21,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Тяжёлые операции — в фоне, чтобы UI стартовал мгновенно
         Notifier.ensureChannels(this)
-        Notifier.scheduleMorning(this)
-        Notifier.scheduleBeforePairs(this)
         RescheduleWorker.schedule(this)
         setContent {
             MaterialTheme(colorScheme = ScheduleDarkScheme) {
@@ -58,7 +59,8 @@ fun App() {
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = true
+                    userScrollEnabled = true,
+                    beyondViewportPageCount = 0   // не держим соседние экраны в памяти
                 ) { page ->
                     when (page) {
                         0 -> TodayScreen()
