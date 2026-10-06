@@ -4,12 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -87,8 +82,6 @@ fun CircleIconButton(
     }
 }
 
-// ─── Парсинг времени ───
-
 private fun parseStartMinutes(time: String): Int? {
     val start = time.substringBefore("-").trim().replace(':', '.')
     val parts = start.split(".")
@@ -137,7 +130,7 @@ private fun buildNotesMap(ctx: android.content.Context): Map<String, String> =
     ScheduleStore.notes(ctx).associate { it.key to it.text }
 
 // ═══════════════════════════════════════════════════════════
-//  ЧАСЫ (без секунд, обновление раз в 30 сек)
+//  ЧАСЫ
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -152,7 +145,7 @@ fun DateClockView() {
             val now = Date()
             dateText = dfDate.format(now).replaceFirstChar { it.uppercase() }
             timeText = dfTime.format(now)
-            kotlinx.coroutines.delay(30_000)   // было 1000 мс
+            kotlinx.coroutines.delay(30_000)
         }
     }
 
@@ -163,7 +156,7 @@ fun DateClockView() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ» (без анимации — она тормозит)
+//  ПЛАШКА «СКОЛЬКО ДО ПАРЫ»
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -173,7 +166,7 @@ fun PairStatusBar(pairs: List<Lesson>) {
     LaunchedEffect(pairs) {
         while (true) {
             statusText = pairStatusText(pairs)
-            kotlinx.coroutines.delay(60_000)   // раз в минуту
+            kotlinx.coroutines.delay(60_000)
         }
     }
 
@@ -234,8 +227,6 @@ fun SkeletonCard() {
             Box(Modifier.height(16.dp).fillMaxWidth(0.85f).background(AppColors.CardElevated, RoundedCornerShape(4.dp)))
             Spacer(Modifier.height(6.dp))
             Box(Modifier.height(12.dp).fillMaxWidth(0.55f).background(AppColors.CardElevated, RoundedCornerShape(4.dp)))
-            Spacer(Modifier.height(6.dp))
-            Box(Modifier.height(12.dp).fillMaxWidth(0.35f).background(AppColors.CardElevated, RoundedCornerShape(4.dp)))
         }
     }
 }
@@ -268,6 +259,7 @@ fun TodayScreen() {
     var showImportGroupPicker by remember { mutableStateOf(false) }
     var importGroups by remember { mutableStateOf<List<String>>(emptyList()) }
     var pendingParsed by remember { mutableStateOf<List<Lesson>>(emptyList()) }
+    var teacherDialog by remember { mutableStateOf<String?>(null) }
 
     EnsureNotificationPermission()
 
@@ -278,6 +270,48 @@ fun TodayScreen() {
     }
     LaunchedEffect(Unit) {
         weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
+    }
+
+    // ─── Диалог со всеми парами преподавателя ───
+    teacherDialog?.let { teacher ->
+        val teacherLessons = ScheduleStore.lessonsByTeacher(ctx, teacher)
+        AlertDialog(
+            onDismissRequest = { teacherDialog = null },
+            title = { Text(teacher, color = AppColors.TextPrimary, fontSize = 16.sp) },
+            text = {
+                if (teacherLessons.isEmpty()) {
+                    Text("Нет пар", color = AppColors.TextSecondary)
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 500.dp)) {
+                        items(teacherLessons) { l ->
+                            Column(Modifier.padding(vertical = 6.dp)) {
+                                Text(
+                                    "${l.day} · ${l.week.name.let { if (it == "EVEN") "чёт" else "нечёт" }} · ${l.number} пара",
+                                    color = AppColors.Accent, fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    l.subgroups.firstOrNull { it.teacher.contains(teacher, true) }?.subject
+                                        ?: l.subgroups.firstOrNull()?.subject ?: "",
+                                    color = AppColors.TextPrimary, fontSize = 13.sp
+                                )
+                                Text(
+                                    "${l.time} · ауд. ${l.subgroups.firstOrNull()?.room ?: "—"} · гр. ${l.group}",
+                                    color = AppColors.TextSecondary, fontSize = 12.sp
+                                )
+                            }
+                            Divider(color = AppColors.Divider)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { teacherDialog = null }) {
+                    Text("Закрыть", color = AppColors.Accent)
+                }
+            },
+            containerColor = AppColors.Card
+        )
     }
 
     if (showImportGroupPicker) {
@@ -302,8 +336,10 @@ fun TodayScreen() {
                                     ScheduleStore.save(ctx, pendingParsed)
                                     pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
                                     status = "Группа $g · пар: ${pendingParsed.size}"
-                                    // В ФОНЕ
-                                    scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                                    scope.launch(Dispatchers.IO) {
+                                        Notifier.scheduleBeforePairs(ctx)
+                                        Notifier.scheduleDnd(ctx)
+                                    }
                                     showImportGroupPicker = false
                                 }
                             ) {
@@ -349,7 +385,10 @@ fun TodayScreen() {
                     ScheduleStore.setGroup(ctx, groupsInFile[0])
                     pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
                     status = "Загружено пар: ${parsed.size}, группа: ${groupsInFile[0]}"
-                    withContext(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                    withContext(Dispatchers.IO) {
+                        Notifier.scheduleBeforePairs(ctx)
+                        Notifier.scheduleDnd(ctx)
+                    }
                 } else {
                     pendingParsed = parsed
                     importGroups = groupsInFile
@@ -382,28 +421,20 @@ fun TodayScreen() {
                 Box(Modifier.weight(1f)) {
                     DateClockView()
                 }
-
                 if (weather != null) {
                     val w = weather!!
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${w.temp}°",
-                            color = AppColors.Accent,
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold
+                            "${w.temp}°", color = AppColors.Accent,
+                            fontSize = 32.sp, fontWeight = FontWeight.Bold
                         )
                         Spacer(Modifier.width(10.dp))
                         Column {
-                            Text(
-                                w.desc,
-                                color = AppColors.TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Text(w.desc, color = AppColors.TextPrimary, fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium)
                             Text(
                                 "ощущ. ${w.feelsLike}° · 💨${w.wind} · 💧${w.humidity}%",
-                                color = AppColors.TextSecondary,
-                                fontSize = 11.sp
+                                color = AppColors.TextSecondary, fontSize = 11.sp
                             )
                         }
                     }
@@ -479,7 +510,8 @@ fun TodayScreen() {
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
                                 notesMap = buildNotesMap(ctx)
-                            }
+                            },
+                            onTeacherClick = { teacherDialog = it }
                         )
                     }
                 }
@@ -502,7 +534,10 @@ fun TodayScreen() {
                     onClick = {
                         week = WeekType.ODD
                         ScheduleStore.setCurrentWeek(ctx, WeekType.ODD)
-                        scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                        scope.launch(Dispatchers.IO) {
+                            Notifier.scheduleBeforePairs(ctx)
+                            Notifier.scheduleDnd(ctx)
+                        }
                     },
                     label = "Нечётная"
                 )
@@ -512,7 +547,10 @@ fun TodayScreen() {
                     onClick = {
                         week = WeekType.EVEN
                         ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN)
-                        scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                        scope.launch(Dispatchers.IO) {
+                            Notifier.scheduleBeforePairs(ctx)
+                            Notifier.scheduleDnd(ctx)
+                        }
                     },
                     label = "Чётная"
                 )
@@ -535,7 +573,10 @@ fun TodayScreen() {
                     onClick = {
                         scope.launch {
                             weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
-                            withContext(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                            withContext(Dispatchers.IO) {
+                                Notifier.scheduleBeforePairs(ctx)
+                                Notifier.scheduleDnd(ctx)
+                            }
                             status = "Обновлено"
                         }
                     }
@@ -572,6 +613,7 @@ fun WeekScreen() {
     var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
     var notesMap by remember { mutableStateOf<Map<String, String>>(buildNotesMap(ctx)) }
     var allPairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
+    var teacherDialog by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(week) {
         val g = ScheduleStore.group(ctx)
@@ -579,6 +621,47 @@ fun WeekScreen() {
             ScheduleStore.load(ctx)?.pairs
                 ?.filter { it.group == g && it.week == week } ?: emptyList()
         }
+    }
+
+    teacherDialog?.let { teacher ->
+        val teacherLessons = ScheduleStore.lessonsByTeacher(ctx, teacher)
+        AlertDialog(
+            onDismissRequest = { teacherDialog = null },
+            title = { Text(teacher, color = AppColors.TextPrimary, fontSize = 16.sp) },
+            text = {
+                if (teacherLessons.isEmpty()) {
+                    Text("Нет пар", color = AppColors.TextSecondary)
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 500.dp)) {
+                        items(teacherLessons) { l ->
+                            Column(Modifier.padding(vertical = 6.dp)) {
+                                Text(
+                                    "${l.day} · ${l.week.name.let { if (it == "EVEN") "чёт" else "нечёт" }} · ${l.number} пара",
+                                    color = AppColors.Accent, fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    l.subgroups.firstOrNull { it.teacher.contains(teacher, true) }?.subject
+                                        ?: l.subgroups.firstOrNull()?.subject ?: "",
+                                    color = AppColors.TextPrimary, fontSize = 13.sp
+                                )
+                                Text(
+                                    "${l.time} · ауд. ${l.subgroups.firstOrNull()?.room ?: "—"} · гр. ${l.group}",
+                                    color = AppColors.TextSecondary, fontSize = 12.sp
+                                )
+                            }
+                            Divider(color = AppColors.Divider)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { teacherDialog = null }) {
+                    Text("Закрыть", color = AppColors.Accent)
+                }
+            },
+            containerColor = AppColors.Card
+        )
     }
 
     val days = listOf("ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА")
@@ -691,7 +774,8 @@ fun WeekScreen() {
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
                                 notesMap = buildNotesMap(ctx)
-                            }
+                            },
+                            onTeacherClick = { teacherDialog = it }
                         )
                     }
                     if (dayPairs.isEmpty()) {
@@ -736,6 +820,105 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  ЭКРАН «ЗВОНКИ»
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+fun BellsScreen() {
+    val ctx = LocalContext.current
+    var bells by remember { mutableStateOf<List<Bell>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        bells = withContext(Dispatchers.IO) { ScheduleStore.bells(ctx) }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Расписание звонков", color = AppColors.TextPrimary,
+            fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text("Из твоего расписания", color = AppColors.TextSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(14.dp))
+
+        if (bells.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.Alarm, null,
+                        tint = AppColors.TextDim,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("Сначала загрузи .xlsx на вкладке «Сегодня»",
+                        color = AppColors.TextSecondary, fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(bells, key = { it.number }) { b ->
+                    BellRow(b)
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BellRow(b: Bell) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = AppColors.Card),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = AppColors.AccentSoft,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    b.number.toString(),
+                    color = AppColors.Accent, fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${b.start} — ${b.end}",
+                    color = AppColors.TextPrimary, fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                val dur = run {
+                    val s = parseStartMinutes(b.start) ?: 0
+                    val e = parseEndMinutes(b.end) ?: 0
+                    e - s
+                }
+                Text("$dur мин", color = AppColors.TextSecondary, fontSize = 12.sp)
+            }
+            if (b.breakBefore > 0) {
+                Surface(
+                    color = AppColors.CardElevated,
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(
+                        "перемена ${b.breakBefore} мин",
+                        color = AppColors.TextSecondary, fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  ЭКРАН «НАСТРОЙКИ»
 // ═══════════════════════════════════════════════════════════
 
@@ -749,12 +932,14 @@ fun SettingsScreen() {
     var morningM by remember { mutableStateOf(ScheduleStore.morningMinute(ctx)) }
     var beforeMin by remember { mutableStateOf(ScheduleStore.beforeMinutes(ctx)) }
     var autoWeek by remember { mutableStateOf(ScheduleStore.autoWeek(ctx)) }
+    var dndEnabled by remember { mutableStateOf(ScheduleStore.dndEnabled(ctx)) }
     var showGroupDialog by remember { mutableStateOf(false) }
     var debugMode by remember { mutableStateOf(false) }
     var totalPairs by remember { mutableStateOf(0) }
 
     var batteryOk by remember { mutableStateOf(PermissionsHelper.isBatteryOptimizationIgnored(ctx)) }
     var exactAlarmOk by remember { mutableStateOf(PermissionsHelper.hasExactAlarmPermission(ctx)) }
+    var dndAccessOk by remember { mutableStateOf(PermissionsHelper.hasDndAccess(ctx)) }
 
     LaunchedEffect(Unit) {
         groups = ScheduleStore.allGroups(ctx)
@@ -762,6 +947,7 @@ fun SettingsScreen() {
         totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
         batteryOk = PermissionsHelper.isBatteryOptimizationIgnored(ctx)
         exactAlarmOk = PermissionsHelper.hasExactAlarmPermission(ctx)
+        dndAccessOk = PermissionsHelper.hasDndAccess(ctx)
     }
 
     if (showGroupDialog) {
@@ -776,7 +962,10 @@ fun SettingsScreen() {
                                 ScheduleStore.setGroup(ctx, g)
                                 group = g
                                 showGroupDialog = false
-                                scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                                scope.launch(Dispatchers.IO) {
+                                    Notifier.scheduleBeforePairs(ctx)
+                                    Notifier.scheduleDnd(ctx)
+                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -847,7 +1036,10 @@ fun SettingsScreen() {
                         onCheckedChange = {
                             autoWeek = it
                             ScheduleStore.setAutoWeek(ctx, it)
-                            scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
+                            scope.launch(Dispatchers.IO) {
+                                Notifier.scheduleBeforePairs(ctx)
+                                Notifier.scheduleDnd(ctx)
+                            }
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
@@ -859,6 +1051,48 @@ fun SettingsScreen() {
                     )
                 }
                 Divider(color = AppColors.Divider)
+            }
+
+            // ─── Режим «Не беспокоить» ───
+            item(key = "sec_dnd") {
+                Spacer(Modifier.height(16.dp))
+                SectionTitle("Не беспокоить")
+            }
+            item(key = "dnd_switch") {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Авто-тишина на паре", color = AppColors.TextPrimary, fontSize = 16.sp)
+                        Text("Включать «Не беспокоить» когда идёт пара",
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = dndEnabled,
+                        onCheckedChange = {
+                            dndEnabled = it
+                            ScheduleStore.setDndEnabled(ctx, it)
+                            scope.launch(Dispatchers.IO) { Notifier.scheduleDnd(ctx) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = AppColors.Accent,
+                            uncheckedThumbColor = AppColors.TextDim,
+                            uncheckedTrackColor = AppColors.CardElevated,
+                            uncheckedBorderColor = AppColors.Border
+                        )
+                    )
+                }
+                Divider(color = AppColors.Divider)
+            }
+            item(key = "dnd_access") {
+                PermissionRow(
+                    title = "Доступ к «Не беспокоить»",
+                    subtitle = if (dndAccessOk) "Разрешён" else "Нужно разрешить для авто-тишины",
+                    ok = dndAccessOk,
+                    onClick = { PermissionsHelper.openDndSettings(ctx) }
+                )
             }
 
             item(key = "sec_perm") {
@@ -896,6 +1130,7 @@ fun SettingsScreen() {
                         scope.launch(Dispatchers.IO) {
                             Notifier.scheduleMorning(ctx)
                             Notifier.scheduleBeforePairs(ctx)
+                            Notifier.scheduleDnd(ctx)
                             RescheduleWorker.schedule(ctx)
                         }
                     },
@@ -927,7 +1162,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        "Версия 1.2" + if (debugMode) "  🐛 DEBUG" else "",
+                        "Версия 1.3" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -952,6 +1187,7 @@ fun SettingsScreen() {
                                 if (ScheduleStore.currentWeek(ctx) == WeekType.EVEN) "Чётная" else "Нечётная")
                             DebugLine("Координаты погоды", "56.60, 84.85 (Северск)")
                             DebugLine("Напоминание за", "$beforeMin мин")
+                            DebugLine("DND авто-режим", if (dndEnabled) "включен" else "выключен")
                             DebugLine("Утренняя сводка", "%02d:%02d".format(morningH, morningM))
                             Spacer(Modifier.height(12.dp))
                             Button(
@@ -1052,7 +1288,8 @@ fun PairCard(
     note: String,
     onToggleFavorite: () -> Unit,
     onToggleSkipped: () -> Unit,
-    onNoteChanged: (String) -> Unit
+    onNoteChanged: (String) -> Unit,
+    onTeacherClick: (String) -> Unit
 ) {
     var noteText by remember(p) { mutableStateOf(note) }
     var editing by remember(p) { mutableStateOf(false) }
@@ -1110,15 +1347,24 @@ fun PairCard(
                         textDecoration = if (isSkipped) TextDecoration.LineThrough else TextDecoration.None
                     )
                     Spacer(Modifier.height(4.dp))
-                    Row {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable(enabled = sg.teacher.isNotBlank()) {
+                            onTeacherClick(sg.teacher)
+                        }
+                    ) {
                         Text("👤 ", fontSize = 12.sp)
-                        Text(sg.teacher.ifEmpty { "—" },
-                            color = AppColors.TextSecondary, fontSize = 13.sp)
+                        Text(
+                            sg.teacher.ifEmpty { "—" },
+                            color = AppColors.Accent, fontSize = 13.sp,
+                            textDecoration = if (sg.teacher.isNotBlank())
+                                TextDecoration.Underline else TextDecoration.None
+                        )
                     }
                     Row {
                         Text("🏛 ", fontSize = 12.sp)
                         Text(sg.room.ifEmpty { "—" },
-                            color = AppColors.Accent, fontSize = 13.sp,
+                            color = AppColors.TextSecondary, fontSize = 13.sp,
                             fontWeight = FontWeight.Medium)
                     }
                 }
