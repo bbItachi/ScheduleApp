@@ -33,6 +33,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Notifier.ensureChannels(this)
         RescheduleWorker.schedule(this)
+
+        // Автообновление: включаем, если пользователь его разрешил
+        val enabled = ScheduleStore.autoUpdate(this)
+        ScheduleUpdater.schedule(this, enabled)
+
+        // Обновить виджет при старте
+        ScheduleWidget.updateAll(this)
+
         setContent {
             MaterialTheme(colorScheme = ScheduleDarkScheme) {
                 App()
