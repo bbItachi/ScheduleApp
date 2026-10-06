@@ -27,7 +27,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -796,121 +795,6 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЭКРАН «ЗВОНКИ»
-// ═══════════════════════════════════════════════════════════
-
-@Composable
-fun BellsScreen() {
-    val ctx = LocalContext.current
-    var bells by remember { mutableStateOf<List<Bell>>(emptyList()) }
-    var loadError by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        try {
-            bells = withContext(Dispatchers.IO) { ScheduleStore.bells(ctx) }
-        } catch (e: Exception) {
-            loadError = e.message
-        }
-    }
-
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Расписание звонков", color = AppColors.TextPrimary,
-            fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
-        Text("Из твоего расписания", color = AppColors.TextSecondary, fontSize = 12.sp)
-        Spacer(Modifier.height(14.dp))
-
-        when {
-            loadError != null -> {
-                Text("Ошибка: $loadError", color = AppColors.Accent, fontSize = 14.sp)
-            }
-            bells.isEmpty() -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.Alarm, null,
-                            tint = AppColors.TextDim,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Сначала загрузи .xlsx на вкладке «Сегодня»",
-                            color = AppColors.TextSecondary, fontSize = 14.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 24.dp)
-                        )
-                    }
-                }
-            }
-            else -> {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    itemsIndexed(
-                        items = bells,
-                        key = { index, b -> "bell_${b.number}_$index" }
-                    ) { _, b ->
-                        BellRow(b)
-                        Spacer(Modifier.height(6.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun BellRow(b: Bell) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                color = AppColors.AccentSoft,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    b.number.toString(),
-                    color = AppColors.Accent, fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "${b.start} — ${b.end}",
-                    color = AppColors.TextPrimary, fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                val dur = run {
-                    val s = parseStartMinutes(b.start) ?: 0
-                    val e = parseEndMinutes(b.end) ?: 0
-                    if (e > s) e - s else 0
-                }
-                Text("$dur мин", color = AppColors.TextSecondary, fontSize = 12.sp)
-            }
-            if (b.breakBefore > 0) {
-                Surface(
-                    color = AppColors.CardElevated,
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text(
-                        "перемена ${b.breakBefore} мин",
-                        color = AppColors.TextSecondary, fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
 //  ЭКРАН «НАСТРОЙКИ»
 // ═══════════════════════════════════════════════════════════
 
@@ -1153,7 +1037,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        "Версия 1.3" + if (debugMode) "  🐛 DEBUG" else "",
+                        "Версия 1.4" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
