@@ -12,6 +12,10 @@ object XlsxParser {
         "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"
     )
 
+    private val KNOWN_ROOMS = setOf(
+        "ЦРК", "М", "ОНЛАЙН", "СЗ", "СЗ/1", "СЗ/2", "М/1", "М/2"
+    )
+
     fun parse(input: InputStream): List<Lesson> {
         var sharedStrings = emptyList<String>()
         var sheetXml: String? = null
@@ -35,6 +39,7 @@ object XlsxParser {
         val maxRow = cells.keys.maxOf { rowOf(it) }
         val maxCol = cells.keys.maxOf { colOf(it) }
 
+        // Найти строку "Группа:"
         var groupRow = -1
         for (r in 1..maxRow) {
             for (c in 1..maxCol) {
@@ -47,6 +52,7 @@ object XlsxParser {
         }
         if (groupRow < 0) error("Не найдена строка с группами")
 
+        // Собрать все группы
         val groups = mutableListOf<Pair<Int, String>>()
         for (c in 1..maxCol) {
             val v = cell(cells, groupRow, c).trim()
@@ -64,6 +70,7 @@ object XlsxParser {
         var week = WeekType.ODD
 
         for (r in (groupRow + 1)..maxRow) {
+            // Ищем метку "ЧЕТНАЯ НЕДЕЛЯ" в любой колонке
             for (c in 1..maxCol) {
                 val v = cell(cells, r, c)
                 if (v.contains("ЧЕТНАЯ", true) || v.contains("ЧЁТНАЯ", true)) {
@@ -83,42 +90,81 @@ object XlsxParser {
 
             for (i in groups.indices) {
                 val (colStart, groupName) = groups[i]
-                val nextCol = groups.getOrNull(i + 1)?.first ?: (colStart + 4)
-                val span = (nextCol - colStart).coerceAtMost(4)
 
-                val s1 = cell(cells, r, colStart).trim()
-                val r1 = cell(cells, r, colStart + 1).trim()
-                val t1 = cell(cells, r + 1, colStart).trim()
-                val tr1 = cell(cells, r + 1, colStart + 1).trim()
+                // Читаем 4 ячейки данных и 4 ячейки преподавателей
+                val rowCells = (0..3).map { cell(cells, r, colStart + it).trim() }
+                val teachCells = (0..3).map { cell(cells, r + 1, colStart + it).trim() }
 
-                val s2 = if (span >= 4) cell(cells, r, colStart + 2).trim() else ""
-                val r2 = if (span >= 4) cell(cells, r, colStart + 3).trim() else ""
-                val t2 = if (span >= 4) cell(cells, r + 1, colStart + 2).trim() else ""
-                val tr2 = if (span >= 4) cell(cells, r + 1, colStart + 3).trim() else ""
+                // Классифицируем содержимое каждой ячейки
+                val subjectPos = mutableListOf<Int>()
+                val roomPos = mutableListOf<Int>()
+                for (k in 0..3) {
+                    val v = rowCells[k]
+                    if (v.isEmpty()) continue
+                    if (looksLikeRoom(v)) roomPos += k else subjectPos += k
+                }
 
                 val subs = mutableListOf<SubgroupPair>()
-                when {
-                    s1.isNotEmpty() && s2.isNotEmpty() -> {
-                        subs += SubgroupPair(1, s1, t1.ifEmpty { tr1 }, r1.ifEmpty { tr1 })
-                        subs += SubgroupPair(2, s2, t2.ifEmpty { tr2 }, r2.ifEmpty { tr2 })
+
+                if (subjectPos.size >= 2 && roomPos.size >= 2) {
+                    // Две подгруппы: каждая со своим предметом и аудиторией
+                    for (k in 0..1) {
+                        val si = subjectPos[k]
+                        val ri = roomPos[k]
+                        val teacher = teachCells.getOrElse(si) { "" }
+                            .ifEmpty { teachCells.firstOrNull { it.isNotEmpty() } ?: "" }
+                        subs += SubgroupPair(k + 1, rowCells[si], teacher, rowCells[ri])
                     }
-                    s1.isNotEmpty() -> {
-                        val room = r1.ifEmpty { tr1 }
-                        val teacher = t1.ifEmpty { tr1 }
-                        subs += SubgroupPair(1, s1, teacher, room)
-                    }
-                    s2.isNotEmpty() -> {
-                        val room = r2.ifEmpty { tr2 }
-                        val teacher = t2.ifEmpty { tr2 }
-                        subs += SubgroupPair(2, s2, teacher, room)
+                } else if (subjectPos.size == 1) {
+                    // Один предмет (для всей группы)
+                    val si = subjectPos[0]
+                    val ri = roomPos.firstOrNull()
+                    val teacher = teachCells.getOrElse(si) { "" }
+                        .ifEmpty { teachCells.firstOrNull { it.isNotEmpty() } ?: "" }
+                    subs += SubgroupPair(
+                        1,
+                        rowCells[si],
+                        teacher,
+                        if (ri != null) rowCells[ri] else ""
+                    )
+                } else if (subjectPos.size >= 2) {
+                    // Два предмета, одна аудитория на всех
+                    val room = roomPos.firstOrNull()?.let { rowCells[it] } ?: ""
+                    for (k in 0..1) {
+                        val si = subjectPos[k]
+                        val teacher = teachCells.getOrElse(si) { "" }
+                        subs += SubgroupPair(k + 1, rowCells[si], teacher, room)
                     }
                 }
+
                 if (subs.isNotEmpty()) {
                     result += Lesson(groupName, pairNum, time, currentDay!!, week, subs)
                 }
             }
         }
         return result
+    }
+
+    /**
+     * Эвристика: ячейка похожа на аудиторию?
+     * Примеры аудиторий: "316/2", "110", "ЦРК", "СЗ", "203/М", "онлайн"
+     */
+    private fun looksLikeRoom(v: String): Boolean {
+        if (v.isEmpty()) return false
+        val t = v.trim()
+        val upper = t.uppercase()
+
+        // Известные "онлайн-аудитории"
+        if (upper in KNOWN_ROOMS) return true
+        if (upper.startsWith("СЗ/") || upper.startsWith("М/")) return true
+        if (upper.startsWith("ЦРК")) return true
+
+        // Есть цифры и мало букв → похоже на номер аудитории
+        val digits = t.count { it.isDigit() }
+        val letters = t.count { it.isLetter() }
+        if (digits >= 1 && letters <= 2 && t.length <= 10 && !t.contains(' ')) return true
+
+        return false
     }
 
     private fun parseSharedStrings(bytes: ByteArray): List<String> {
@@ -151,16 +197,19 @@ object XlsxParser {
     }
 
     private fun rowOf(ref: String): Int = ref.dropWhile { !it.isDigit() }.toIntOrNull() ?: 0
+
     private fun colOf(ref: String): Int {
         var n = 0
         for (c in ref) { if (c.isDigit()) break; n = n * 26 + (c.uppercaseChar() - 'A' + 1) }
         return n
     }
+
     private fun colLetter(col: Int): String {
         var n = col; val sb = StringBuilder()
         while (n > 0) { n--; sb.insert(0, ('A' + (n % 26))); n /= 26 }
         return sb.toString()
     }
+
     private fun cell(cells: Map<String, String>, row: Int, col: Int): String =
         cells[colLetter(col) + row] ?: ""
 }
