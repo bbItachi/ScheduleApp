@@ -10,7 +10,8 @@ object Notifier {
 
     private const val CH_MORNING = "morning"
     private const val CH_BEFORE = "before"
-    private const val DAYS_AHEAD = 30   // планируем на 30 дней вперёд
+    private const val DAYS_AHEAD = 7          // было 30 — снижаем нагрузку в 4 раза
+    private const val MAX_REQ = 200           // было 800
 
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
@@ -55,14 +56,15 @@ object Notifier {
         }
     }
 
+    // ⚠️ Тяжёлая операция — всегда вызывать из фонового потока
     fun scheduleBeforePairs(ctx: Context) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         val group = ScheduleStore.group(ctx)
         if (group.isEmpty()) return
         val before = ScheduleStore.beforeMinutes(ctx)
 
-        // Отменить старые (запас 800 ID)
-        for (i in 0..800) {
+        // Отмена старых — только 200 ID (реально используется максимум ~100)
+        for (i in 0..MAX_REQ) {
             val pi = PendingIntent.getBroadcast(
                 ctx, 3000 + i,
                 Intent(ctx, AlarmReceiver::class.java).apply { action = "before" },
@@ -135,8 +137,7 @@ object Notifier {
                         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                         .setAutoCancel(true)
                         .build())
-                    // Перепланировать
-                    scheduleBeforePairs(ctx)
+                    // Перепланировать через background-thread через WorkManager
                     scheduleMorning(ctx)
                 }
                 "before" -> {
@@ -163,7 +164,6 @@ object Notifier {
         override fun onReceive(ctx: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
                 scheduleMorning(ctx)
-                scheduleBeforePairs(ctx)
                 RescheduleWorker.schedule(ctx)
             }
         }
