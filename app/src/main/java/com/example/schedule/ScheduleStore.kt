@@ -6,18 +6,17 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.Calendar
 
+data class Bell(val number: Int, val start: String, val end: String, val breakBefore: Int)
+
 object ScheduleStore {
     private const val FILE = "schedule.json"
     private const val NOTES_FILE = "notes.json"
     private val json = Json { ignoreUnknownKeys = true }
 
-    // ─── Кэш в памяти ───
     private var scheduleCache: SavedSchedule? = null
     private var scheduleLoaded = false
     private var notesCache: List<Note>? = null
     private var prefsInstance: SharedPreferences? = null
-
-    // Кэш пар: ключ "ПОНЕДЕЛЬНИК|ODD|Д043" → список
     private val pairsCache = HashMap<String, List<Lesson>>()
 
     private fun prefs(ctx: Context): SharedPreferences {
@@ -26,8 +25,6 @@ object ScheduleStore {
         prefsInstance = p
         return p
     }
-
-    // ─── Расписание ───
 
     fun save(ctx: Context, pairs: List<Lesson>) {
         val data = SavedSchedule(pairs, System.currentTimeMillis())
@@ -59,8 +56,6 @@ object ScheduleStore {
         scheduleLoaded = true
         pairsCache.clear()
     }
-
-    // ─── Настройки ───
 
     fun currentWeek(ctx: Context): WeekType =
         if (prefs(ctx).getString("week", "EVEN") == "ODD") WeekType.ODD else WeekType.EVEN
@@ -95,7 +90,11 @@ object ScheduleStore {
         prefs(ctx).edit().putLong("sem_start", t).apply()
     }
 
-    // ─── Избранное ───
+    // ─── Режим «Не беспокоить» ───
+    fun dndEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean("dnd_enabled", false)
+    fun setDndEnabled(ctx: Context, v: Boolean) {
+        prefs(ctx).edit().putBoolean("dnd_enabled", v).apply()
+    }
 
     fun favorites(ctx: Context): Set<String> =
         prefs(ctx).getStringSet("favorites", emptySet()) ?: emptySet()
@@ -107,8 +106,6 @@ object ScheduleStore {
         return added
     }
 
-    // ─── Пропуск ───
-
     fun skipped(ctx: Context): Set<String> =
         prefs(ctx).getStringSet("skipped", emptySet()) ?: emptySet()
 
@@ -118,8 +115,6 @@ object ScheduleStore {
         prefs(ctx).edit().putStringSet("skipped", cur).apply()
         return added
     }
-
-    // ─── Заметки ───
 
     fun notes(ctx: Context): List<Note> {
         notesCache?.let { return it }
@@ -146,8 +141,6 @@ object ScheduleStore {
         if (text.isNotBlank()) cur.add(Note(key, text, System.currentTimeMillis()))
         saveNotes(ctx, cur)
     }
-
-    // ─── Данные (с кэшем) ───
 
     fun pairsFor(ctx: Context, day: String, week: WeekType): List<Lesson> {
         val g = group(ctx)
@@ -192,5 +185,54 @@ object ScheduleStore {
         val diffDays = ((cal.timeInMillis - start) / (1000L * 60 * 60 * 24)).toInt()
         val weekNum = diffDays / 7
         return if (weekNum % 2 == 0) WeekType.ODD else WeekType.EVEN
+    }
+
+    // ─── Расписание звонков ───
+
+    private fun timeToMinutes(t: String): Int? {
+        val clean = t.trim().replace(':', '.').replace("-", " ")
+        val parts = clean.split(Regex("\\s+"))
+        if (parts.isEmpty()) return null
+        val hm = parts[0].split(".")
+        if (hm.size < 2) return null
+        val h = hm[0].toIntOrNull() ?: return null
+        val m = hm[1].toIntOrNull() ?: return null
+        return h * 60 + m
+    }
+
+    fun bells(ctx: Context): List<Bell> {
+        val all = load(ctx)?.pairs ?: return emptyList()
+        val unique = all
+            .map { it.number to it.time }
+            .distinct()
+            .sortedBy { it.first }
+        val result = mutableListOf<Bell>()
+        var prevEnd: Int? = null
+        for ((num, time) in unique) {
+            val startStr = time.substringBefore("-").trim()
+            val endStr = time.substringAfter("-").trim()
+            val startMin = timeToMinutes(startStr) ?: continue
+            val endMin = timeToMinutes(endStr) ?: continue
+            val breakMin = if (prevEnd != null) startMin - prevEnd else 0
+            result += Bell(num, startStr, endStr, breakMin)
+            prevEnd = endMin
+        }
+        return result
+    }
+
+    // ─── Все пары преподавателя за обе недели ───
+
+    fun lessonsByTeacher(ctx: Context, teacher: String): List<Lesson> {
+        val all = load(ctx)?.pairs ?: return emptyList()
+        return all.filter { l -> l.subgroups.any { it.teacher.contains(teacher, true) } }
+            .sortedWith(compareBy({ it.week.name }, { it.day }, { it.number }))
+    }
+
+    fun allTeachers(ctx: Context): List<String> {
+        val all = load(ctx)?.pairs ?: return emptyList()
+        return all.flatMap { l -> l.subgroups.map { it.teacher } }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
     }
 }
