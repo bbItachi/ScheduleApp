@@ -1,10 +1,12 @@
 package com.example.schedule
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -22,8 +26,71 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.IDN
 import java.text.SimpleDateFormat
 import java.util.*
+
+// ═══════════════════════════════════════════════════════════
+//  ОБЩИЕ КОМПОНЕНТЫ
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+fun AppFilterChip(selected: Boolean, onClick: () -> Unit, label: String) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 14.sp) },
+        shape = RoundedCornerShape(20.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = AppColors.Card,
+            labelColor = AppColors.TextSecondary,
+            selectedContainerColor = AppColors.Accent,
+            selectedLabelColor = Color.White
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (selected) AppColors.Accent else AppColors.Border
+        )
+    )
+}
+
+@Composable
+fun PrimaryButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = AppColors.Accent,
+            contentColor = Color.White
+        ),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        if (icon != null) {
+            Icon(icon, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+fun SecondaryButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = AppColors.Accent
+        ),
+        border = BorderStroke(1.dp, AppColors.Accent),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        if (icon != null) {
+            Icon(icon, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  ЭКРАН «СЕГОДНЯ»
@@ -79,30 +146,39 @@ fun TodayScreen() {
     val group = ScheduleStore.group(ctx)
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
+        // ── Погода ──
         Card(
             colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text(df.format(now), color = AppColors.TextPrimary, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold)
-                Text(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now),
-                    color = AppColors.TextSecondary, fontSize = 14.sp)
-                Spacer(Modifier.height(12.dp))
+                Text(
+                    df.format(now).replaceFirstChar { it.uppercase() },
+                    color = AppColors.TextPrimary, fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now),
+                    color = AppColors.TextSecondary, fontSize = 14.sp
+                )
+                Spacer(Modifier.height(14.dp))
                 if (weather != null) {
                     val w = weather!!
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${w.temp}°", color = AppColors.Accent,
-                            fontSize = 42.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${w.temp}°", color = AppColors.Accent,
+                            fontSize = 48.sp, fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.width(14.dp))
                         Column {
-                            Text(w.desc, color = AppColors.TextPrimary, fontSize = 16.sp)
+                            Text(w.desc, color = AppColors.TextPrimary, fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold)
                             Text("Ощущается как ${w.feelsLike}°",
                                 color = AppColors.TextSecondary, fontSize = 13.sp)
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
                     Row {
                         WeatherChip("💨 ${w.wind} м/с")
                         Spacer(Modifier.width(8.dp))
@@ -111,54 +187,67 @@ fun TodayScreen() {
                         WeatherChip("🌡 ${w.pressure} мм")
                     }
                 } else {
-                    Text("Погода недоступна", color = AppColors.TextSecondary, fontSize = 14.sp)
+                    Text("Погода загружается…", color = AppColors.TextSecondary, fontSize = 14.sp)
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
+        // ── Переключатель недели ──
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Неделя: ", color = AppColors.TextPrimary, fontSize = 15.sp)
-            Spacer(Modifier.width(4.dp))
-            FilterChip(
+            Text("Неделя:", color = AppColors.TextPrimary, fontSize = 15.sp)
+            Spacer(Modifier.width(8.dp))
+            AppFilterChip(
                 selected = week == WeekType.ODD,
                 onClick = {
                     week = WeekType.ODD
                     ScheduleStore.setCurrentWeek(ctx, WeekType.ODD)
                     Notifier.scheduleBeforePairs(ctx)
                 },
-                label = { Text("Нечётная") }
+                label = "Нечётная"
             )
             Spacer(Modifier.width(6.dp))
-            FilterChip(
+            AppFilterChip(
                 selected = week == WeekType.EVEN,
                 onClick = {
                     week = WeekType.EVEN
                     ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN)
                     Notifier.scheduleBeforePairs(ctx)
                 },
-                label = { Text("Чётная") }
+                label = "Чётная"
             )
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
-        Row {
-            Button(onClick = {
-                picker.launch(arrayOf(
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-excel", "*/*"
-                ))
-            }) { Text("Загрузить .xlsx") }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = {
-                scope.launch {
-                    weather = Weather.fetch()
-                    Notifier.scheduleBeforePairs(ctx)
-                    status = "Обновлено"
+        // ── Кнопки ──
+        Column {
+            Row {
+                PrimaryButton("Загрузить .xlsx", Icons.Default.Upload) {
+                    picker.launch(arrayOf(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "application/vnd.ms-excel", "*/*"
+                    ))
                 }
-            }) { Text("Обновить") }
+                Spacer(Modifier.width(8.dp))
+                SecondaryButton("Обновить", Icons.Default.Refresh) {
+                    scope.launch {
+                        weather = Weather.fetch()
+                        Notifier.scheduleBeforePairs(ctx)
+                        status = "Обновлено"
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            // Кнопка «Скачать расписание» → сайт колледжа
+            SecondaryButton("Скачать расписание", Icons.Default.Download) {
+                try {
+                    val host = IDN.toASCII("споспк.рф")
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://$host/"))
+                    ctx.startActivity(intent)
+                } catch (_: Exception) { }
+            }
         }
 
         if (status.isNotEmpty()) {
@@ -166,19 +255,31 @@ fun TodayScreen() {
             Text(status, color = AppColors.Accent, fontSize = 13.sp)
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
+        // ── Заголовок дня ──
         Text(
-            "$dayName (${if (week == WeekType.EVEN) "чётная" else "нечётная"}) • " +
-            group.ifEmpty { "группа не выбрана" },
-            color = AppColors.Accent, fontSize = 16.sp, fontWeight = FontWeight.Bold
+            "$dayName (${if (week == WeekType.EVEN) "чётная" else "нечётная"})",
+            color = AppColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold
         )
+        if (group.isNotEmpty()) {
+            Text("Группа $group", color = AppColors.TextSecondary, fontSize = 13.sp)
+        }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
 
         if (pairs.isEmpty()) {
-            Text("Пар нет 🎉", color = AppColors.Accent, fontSize = 16.sp,
-                modifier = Modifier.padding(top = 20.dp))
+            Box(
+                Modifier.fillMaxWidth().padding(top = 40.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.CheckCircle, null,
+                        tint = AppColors.Accent, modifier = Modifier.size(48.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("Пар нет", color = AppColors.TextSecondary, fontSize = 16.sp)
+                }
+            }
         } else {
             LazyColumn {
                 items(pairs) { p ->
@@ -200,9 +301,13 @@ fun TodayScreen() {
 
 @Composable
 fun WeatherChip(text: String) {
-    Surface(color = AppColors.CardElevated, shape = RoundedCornerShape(8.dp)) {
+    Surface(
+        color = AppColors.CardElevated,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, AppColors.Border)
+    ) {
         Text(text, color = AppColors.TextSecondary, fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
     }
 }
 
@@ -243,41 +348,54 @@ fun WeekScreen() {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Расписание на неделю", color = AppColors.TextPrimary,
             fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(
+            AppFilterChip(
                 selected = week == WeekType.ODD,
                 onClick = { week = WeekType.ODD; ScheduleStore.setCurrentWeek(ctx, WeekType.ODD) },
-                label = { Text("Нечётная") }
+                label = "Нечётная"
             )
             Spacer(Modifier.width(6.dp))
-            FilterChip(
+            AppFilterChip(
                 selected = week == WeekType.EVEN,
                 onClick = { week = WeekType.EVEN; ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN) },
-                label = { Text("Чётная") }
+                label = "Чётная"
             )
             Spacer(Modifier.weight(1f))
             FilterChip(
                 selected = showOnlyFavorites,
                 onClick = { showOnlyFavorites = !showOnlyFavorites },
-                label = { Text("⭐") }
+                label = { Icon(Icons.Default.Star, null, Modifier.size(18.dp)) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = AppColors.Card,
+                    selectedContainerColor = AppColors.Accent
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (showOnlyFavorites) AppColors.Accent else AppColors.Border
+                )
             )
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
 
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Поиск: предмет, преподаватель, аудитория") },
+            leadingIcon = { Icon(Icons.Default.Search, null, tint = AppColors.TextDim) },
             singleLine = true,
+            shape = RoundedCornerShape(10.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = AppColors.Accent,
                 unfocusedBorderColor = AppColors.Border,
                 focusedTextColor = AppColors.TextPrimary,
-                unfocusedTextColor = AppColors.TextPrimary
+                unfocusedTextColor = AppColors.TextPrimary,
+                focusedPlaceholderColor = AppColors.TextDim,
+                unfocusedPlaceholderColor = AppColors.TextDim,
+                cursorColor = AppColors.Accent
             )
         )
 
@@ -325,27 +443,40 @@ fun WeekScreen() {
 
 @Composable
 fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        color = AppColors.Card,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() }
     ) {
-        Icon(
-            if (expanded) Icons.Default.KeyboardArrowDown
-            else Icons.Default.KeyboardArrowRight,
-            null, tint = AppColors.Accent
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(day, color = AppColors.Accent, fontSize = 16.sp,
-            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        Text("$count", color = AppColors.TextSecondary, fontSize = 14.sp)
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowDown
+                else Icons.Default.KeyboardArrowRight,
+                null, tint = AppColors.Accent
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(day, color = AppColors.TextPrimary, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Surface(
+                color = AppColors.AccentSoft,
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text("$count", color = AppColors.Accent, fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
+            }
+        }
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЭКРАН «НАСТРОЙКИ» (с debug-режимом)
+//  ЭКРАН «НАСТРОЙКИ» (с debug-режимом — 5 секунд)
 // ═══════════════════════════════════════════════════════════
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen() {
     val ctx = LocalContext.current
@@ -391,7 +522,9 @@ fun SettingsScreen() {
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showGroupDialog = false }) { Text("Закрыть") }
+                TextButton(onClick = { showGroupDialog = false }) {
+                    Text("Закрыть", color = AppColors.Accent)
+                }
             },
             containerColor = AppColors.Card
         )
@@ -459,35 +592,60 @@ fun SettingsScreen() {
                     autoWeek = it
                     ScheduleStore.setAutoWeek(ctx, it)
                     Notifier.scheduleBeforePairs(ctx)
-                }
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppColors.Accent,
+                    uncheckedThumbColor = AppColors.TextDim,
+                    uncheckedTrackColor = AppColors.CardElevated,
+                    uncheckedBorderColor = AppColors.Border
+                )
             )
         }
         Divider(color = AppColors.Divider)
 
         Spacer(Modifier.height(24.dp))
 
-        // ⚙️ DEBUG-режим: долгое нажатие на «Версия 1.0»
-        Text(
-            text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
-            color = if (debugMode) AppColors.Accent else AppColors.TextDim,
-            fontSize = 12.sp,
+        // ⚙️ DEBUG — долгое нажатие 5 секунд
+        Surface(
+            color = Color.Transparent,
             modifier = Modifier
                 .fillMaxWidth()
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = { debugMode = !debugMode }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            val start = System.currentTimeMillis()
+                            tryAwaitRelease()
+                            val duration = System.currentTimeMillis() - start
+                            if (duration >= 5000L) {
+                                debugMode = !debugMode
+                            }
+                        }
+                    )
+                }
+        ) {
+            Column(Modifier.padding(vertical = 12.dp)) {
+                Text(
+                    text = "Версия 1.0" + if (debugMode) "  🐛 DEBUG" else "",
+                    color = if (debugMode) AppColors.Accent else AppColors.TextDim,
+                    fontSize = 12.sp
                 )
-                .padding(vertical = 8.dp)
-        )
+                Text(
+                    "Зажми на 5 сек для отладки",
+                    color = AppColors.TextDim, fontSize = 10.sp
+                )
+            }
+        }
 
         if (debugMode) {
             Spacer(Modifier.height(12.dp))
             Card(
                 colors = CardDefaults.cardColors(containerColor = AppColors.Card),
                 shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, AppColors.Accent),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(Modifier.padding(12.dp)) {
+                Column(Modifier.padding(14.dp)) {
                     Text("🐛 Отладочная информация", color = AppColors.Accent,
                         fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
@@ -505,8 +663,10 @@ fun SettingsScreen() {
                             totalPairs = 0
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = AppColors.AccentDark
+                            containerColor = AppColors.AccentDark,
+                            contentColor = Color.White
                         ),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("🗑 Сбросить расписание") }
                 }
@@ -527,14 +687,21 @@ fun DebugLine(label: String, value: String) {
 
 @Composable
 fun SettingRow(title: String, value: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }
     ) {
-        Text(title, color = AppColors.TextPrimary, fontSize = 16.sp,
-            modifier = Modifier.weight(1f))
-        Text(value, color = AppColors.Accent, fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold)
+        Row(
+            Modifier.padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, color = AppColors.TextPrimary, fontSize = 16.sp,
+                modifier = Modifier.weight(1f))
+            Text(value, color = AppColors.Accent, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Default.KeyboardArrowRight, null, tint = AppColors.TextDim)
+        }
     }
     Divider(color = AppColors.Divider)
 }
@@ -556,16 +723,29 @@ fun PairCard(
 
     Card(
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(p.number.toString(), color = AppColors.Accent,
-                    fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.width(36.dp))
-                Text(p.time, color = AppColors.TextPrimary, fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                // Номер пары — в кружочке
+                Surface(
+                    color = AppColors.AccentSoft,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        p.number.toString(),
+                        color = AppColors.Accent, fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    p.time, color = AppColors.TextPrimary, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+                )
                 IconButton(onClick = onToggleFavorite) {
                     Icon(
                         if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
@@ -578,33 +758,47 @@ fun PairCard(
                 }
             }
 
+            Spacer(Modifier.height(6.dp))
+
             p.subgroups.forEach { sg ->
-                Column(Modifier.padding(start = 36.dp, top = 4.dp)) {
+                Column(Modifier.padding(top = 4.dp)) {
                     val prefix = if (p.subgroups.size > 1) "Подгр. ${sg.index}: " else ""
                     Text(prefix + sg.subject, color = AppColors.TextPrimary,
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Преп. ${sg.teacher.ifEmpty { "—" }}",
-                        color = AppColors.TextSecondary, fontSize = 13.sp)
-                    Text("Ауд. ${sg.room.ifEmpty { "—" }}",
-                        color = AppColors.Accent, fontSize = 13.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Row {
+                        Text("👤 ", fontSize = 12.sp)
+                        Text(sg.teacher.ifEmpty { "—" },
+                            color = AppColors.TextSecondary, fontSize = 13.sp)
+                    }
+                    Row {
+                        Text("🏛 ", fontSize = 12.sp)
+                        Text(sg.room.ifEmpty { "—" },
+                            color = AppColors.Accent, fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium)
+                    }
                 }
             }
 
             if (editing) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = noteText,
                     onValueChange = { noteText = it },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Заметка к паре…") },
+                    shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AppColors.Accent,
                         unfocusedBorderColor = AppColors.Border,
                         focusedTextColor = AppColors.TextPrimary,
-                        unfocusedTextColor = AppColors.TextPrimary
+                        unfocusedTextColor = AppColors.TextPrimary,
+                        focusedPlaceholderColor = AppColors.TextDim,
+                        unfocusedPlaceholderColor = AppColors.TextDim,
+                        cursorColor = AppColors.Accent
                     )
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
                 Row {
                     TextButton(onClick = {
                         val key = "${p.group}|${p.day}|${p.week}|${p.number}"
@@ -616,14 +810,14 @@ fun PairCard(
                     }
                 }
             } else if (noteText.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Surface(
                     color = AppColors.AccentSoft,
-                    shape = RoundedCornerShape(6.dp)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("📝 $noteText", color = AppColors.TextPrimary,
                         fontSize = 13.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
         }
