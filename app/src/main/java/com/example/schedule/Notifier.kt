@@ -2,8 +2,11 @@ package com.example.schedule
 
 import android.app.*
 import android.content.*
+import android.graphics.Bitmap
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import java.util.*
 
 object Notifier {
@@ -11,16 +14,41 @@ object Notifier {
     private const val CH_MORNING = "morning"
     private const val CH_BEFORE = "before"
     private const val DAYS_AHEAD = 7
+    private const val GROUP_KEY = "com.example.schedule.GROUP"
 
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(CH_MORNING, "Утренняя сводка", NotificationManager.IMPORTANCE_DEFAULT)
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(CH_BEFORE, "Перед парой", NotificationManager.IMPORTANCE_HIGH)
-        )
+
+        val morning = NotificationChannel(
+            CH_MORNING, "Утренняя сводка", NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Пары и погода на сегодня"
+            enableLights(true)
+            lightColor = 0xFF3B82F6.toInt()
+            setShowBadge(true)
+        }
+        nm.createNotificationChannel(morning)
+
+        val before = NotificationChannel(
+            CH_BEFORE, "Перед парой", NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Напоминание за несколько минут до пары"
+            enableLights(true)
+            lightColor = 0xFF3B82F6.toInt()
+            enableVibration(true)
+            setShowBadge(true)
+        }
+        nm.createNotificationChannel(before)
+    }
+
+    // ─── Большая иконка приложения (как на iPhone) ───
+
+    private fun getLargeIcon(ctx: Context): Bitmap? {
+        return try {
+            val drawable = ContextCompat.getDrawable(ctx, R.drawable.ic_launcher_app)
+            drawable?.toBitmap(width = 128, height = 128)
+        } catch (_: Exception) { null }
     }
 
     private fun parseStartMinutes(time: String): Pair<Int, Int>? {
@@ -122,12 +150,9 @@ object Notifier {
         }
     }
 
-    // ─── Планирование переключения DND на начало/конец пары ───
-
     fun scheduleDnd(ctx: Context) {
         val am = ctx.getSystemService(AlarmManager::class.java)
 
-        // Отменить старые (5000..5600)
         for (i in 0..600) {
             val pi = PendingIntent.getBroadcast(
                 ctx, 5000 + i,
@@ -208,18 +233,50 @@ object Notifier {
                     val dayName = ScheduleStore.dayNameRuFor(today)
                     val week = ScheduleStore.weekFor(ctx, today)
                     val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
-                    val body = if (pairs.isEmpty()) "Пар нет 🎉"
-                    else pairs.joinToString("\n") { p ->
-                        "${p.number}. ${p.time} — ${p.subgroups.joinToString("/") { it.subject }} (ауд. ${p.subgroups.first().room})"
+
+                    val largeIcon = getLargeIcon(ctx)
+
+                    if (pairs.isEmpty()) {
+                        val n = NotificationCompat.Builder(ctx, CH_MORNING)
+                            .setSmallIcon(R.drawable.ic_notification)
+                            .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
+                            .setColor(0xFF3B82F6.toInt())
+                            .setContentTitle("Доброе утро!")
+                            .setContentText("Сегодня пар нет 🎉")
+                            .setAutoCancel(true)
+                            .setGroup(GROUP_KEY)
+                            .build()
+                        nm.notify(1, n)
+                    } else {
+                        // Стиль «Inbox» — список пар как на iPhone
+                        val style = NotificationCompat.InboxStyle()
+                        for (p in pairs.take(7)) {
+                            val subj = p.subgroups.joinToString("/") { it.subject }
+                                .let { if (it.length > 40) it.take(37) + "…" else it }
+                            style.addLine("${p.number}. ${p.time}  ·  $subj")
+                        }
+                        if (pairs.size > 7) {
+                            style.setSummaryText("и ещё ${pairs.size - 7}…")
+                        } else {
+                            style.setSummaryText("Всего: ${pairs.size}")
+                        }
+
+                        val n = NotificationCompat.Builder(ctx, CH_MORNING)
+                            .setSmallIcon(R.drawable.ic_notification)
+                            .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
+                            .setColor(0xFF3B82F6.toInt())
+                            .setContentTitle("Доброе утро! Пары на сегодня")
+                            .setContentText("${pairs.size} ${plural(pairs.size, "пара", "пары", "пар")} · нажми, чтобы открыть")
+                            .setStyle(style)
+                            .setAutoCancel(true)
+                            .setGroup(GROUP_KEY)
+                            .setShowWhen(true)
+                            .build()
+                        nm.notify(1, n)
                     }
-                    nm.notify(1, NotificationCompat.Builder(ctx, CH_MORNING)
-                        .setSmallIcon(android.R.drawable.ic_dialog_info)
-                        .setContentTitle("Доброе утро! Пары на сегодня")
-                        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-                        .setAutoCancel(true)
-                        .build())
                     scheduleMorning(ctx)
                 }
+
                 "before" -> {
                     val subject = intent.getStringExtra("subject") ?: ""
                     val room = intent.getStringExtra("room") ?: ""
@@ -227,31 +284,53 @@ object Notifier {
                     val time = intent.getStringExtra("time") ?: ""
                     val num = intent.getIntExtra("num", 0)
                     val before = intent.getIntExtra("before", 15)
-                    nm.notify(200 + num, NotificationCompat.Builder(ctx, CH_BEFORE)
-                        .setSmallIcon(android.R.drawable.ic_dialog_alert)
+
+                    val largeIcon = getLargeIcon(ctx)
+
+                    val n = NotificationCompat.Builder(ctx, CH_BEFORE)
+                        .setSmallIcon(R.drawable.ic_notification)
+                        .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
+                        .setColor(0xFF3B82F6.toInt())
                         .setContentTitle("Пара $num через $before мин")
-                        .setContentText("$subject • ауд. $room")
-                        .setStyle(NotificationCompat.BigTextStyle()
-                            .bigText("$subject\nАудитория: $room\nПреподаватель: $teacher\nВремя: $time"))
+                        .setContentText("$subject · ауд. $room")
+                        .setStyle(
+                            NotificationCompat.BigTextStyle()
+                                .bigText(
+                                    "$subject\n" +
+                                    "Аудитория: $room\n" +
+                                    "Преподаватель: $teacher\n" +
+                                    "Время: $time"
+                                )
+                        )
                         .setAutoCancel(true)
-                        .build())
+                        .setGroup(GROUP_KEY)
+                        .setCategory(NotificationCompat.CATEGORY_EVENT)
+                        .setShowWhen(true)
+                        .build()
+                    nm.notify(200 + num, n)
                 }
+
                 "dnd_on" -> {
                     if (ScheduleStore.dndEnabled(ctx)) {
-                        try {
-                            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
-                        } catch (_: SecurityException) { }
+                        try { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE) }
+                        catch (_: SecurityException) { }
                     }
                 }
+
                 "dnd_off" -> {
                     if (ScheduleStore.dndEnabled(ctx)) {
-                        try {
-                            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-                        } catch (_: SecurityException) { }
+                        try { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
+                        catch (_: SecurityException) { }
                     }
                 }
             }
         }
+    }
+
+    private fun plural(n: Int, one: String, few: String, many: String): String = when {
+        n % 10 == 1 && n % 100 != 11 -> one
+        n % 10 in 2..4 && (n % 100 < 10 || n % 100 >= 20) -> few
+        else -> many
     }
 
     class BootReceiver : BroadcastReceiver() {
