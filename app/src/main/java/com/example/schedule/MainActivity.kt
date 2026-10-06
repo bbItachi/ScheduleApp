@@ -25,13 +25,25 @@ class MainActivity : ComponentActivity() {
         Notifier.ensureChannels(this)
         Notifier.scheduleMorning(this)
         Notifier.scheduleBeforePairs(this)
-        setContent { MaterialTheme(colorScheme = darkColorScheme()) { App() } }
+        setContent {
+            MaterialTheme(colorScheme = ScheduleDarkScheme) {
+                App()
+            }
+        }
     }
 }
 
 @Composable
 fun App() {
     var tab by remember { mutableStateOf(0) }
+
+    val navColors = NavigationBarItemDefaults.colors(
+        selectedIconColor = AppColors.Accent,
+        selectedTextColor = AppColors.Accent,
+        unselectedIconColor = AppColors.TextDim,
+        unselectedTextColor = AppColors.TextDim,
+        indicatorColor = AppColors.AccentSoft
+    )
 
     Surface(Modifier.fillMaxSize(), color = AppColors.Background) {
         Column(Modifier.fillMaxSize()) {
@@ -42,21 +54,27 @@ fun App() {
                     2 -> SettingsScreen()
                 }
             }
-            NavigationBar(containerColor = AppColors.Card) {
+            NavigationBar(
+                containerColor = AppColors.Card,
+                contentColor = AppColors.TextPrimary
+            ) {
                 NavigationBarItem(
                     selected = tab == 0, onClick = { tab = 0 },
                     icon = { Icon(Icons.Default.Home, null) },
-                    label = { Text("Сегодня") }
+                    label = { Text("Сегодня") },
+                    colors = navColors
                 )
                 NavigationBarItem(
                     selected = tab == 1, onClick = { tab = 1 },
                     icon = { Icon(Icons.Default.DateRange, null) },
-                    label = { Text("Неделя") }
+                    label = { Text("Неделя") },
+                    colors = navColors
                 )
                 NavigationBarItem(
                     selected = tab == 2, onClick = { tab = 2 },
                     icon = { Icon(Icons.Default.Settings, null) },
-                    label = { Text("Настройки") }
+                    label = { Text("Настройки") },
+                    colors = navColors
                 )
             }
         }
