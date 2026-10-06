@@ -18,6 +18,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -63,7 +64,7 @@ fun App() {
                     .pointerInput(Unit) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
-                                if (dragAccum < -120f && tab < 2) tab++
+                                if (dragAccum < -120f && tab < 3) tab++
                                 else if (dragAccum > 120f && tab > 0) tab--
                                 dragAccum = 0f
                             },
@@ -91,6 +92,7 @@ fun App() {
                     when (target) {
                         0 -> TodayScreen()
                         1 -> WeekScreen()
+                        2 -> BellsScreen()
                         else -> SettingsScreen()
                     }
                 }
@@ -113,8 +115,14 @@ fun App() {
                 )
                 NavigationBarItem(
                     selected = tab == 2, onClick = { tab = 2 },
+                    icon = { Icon(Icons.Default.Alarm, null) },
+                    label = { Text("Звонки") },
+                    colors = navColors
+                )
+                NavigationBarItem(
+                    selected = tab == 3, onClick = { tab = 3 },
                     icon = { Icon(Icons.Default.Settings, null) },
-                    label = { Text("Настройки") },
+                    label = { Text("Ещё") },
                     colors = navColors
                 )
             }
