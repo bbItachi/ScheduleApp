@@ -10,12 +10,10 @@ import java.net.URL
 
 object Weather {
 
-    // Ключ Яндекс.Погоды
     private const val YANDEX_KEY = "7361d265-d0b7-4f40-bd3a-68723050133a"
-
-    // Северск, Томская область
     private const val LAT = 56.6003
     private const val LON = 84.8503
+    private const val CACHE_TTL_MS = 30 * 60 * 1000L   // 30 минут
 
     data class Info(
         val temp: Int,
@@ -26,7 +24,16 @@ object Weather {
         val desc: String
     )
 
-    suspend fun fetch(): Info? = withContext(Dispatchers.IO) {
+    // ─── Кэш в памяти ───
+    private var cached: Info? = null
+    private var cacheTime: Long = 0
+
+    suspend fun fetch(force: Boolean = false): Info? = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (!force) {
+            cached?.let { if (now - cacheTime < CACHE_TTL_MS) return@withContext it }
+        }
+
         try {
             val url = URL(
                 "https://api.weather.yandex.ru/v2/forecast" +
@@ -42,7 +49,7 @@ object Weather {
             val root = Json.parseToJsonElement(text).jsonObject
             val fact = root["fact"]!!.jsonObject
 
-            Info(
+            val info = Info(
                 temp = fact["temp"]!!.jsonPrimitive.content.toInt(),
                 feelsLike = fact["feels_like"]!!.jsonPrimitive.content.toInt(),
                 wind = fact["wind_speed"]!!.jsonPrimitive.content.toDouble(),
@@ -50,7 +57,13 @@ object Weather {
                 pressure = fact["pressure_mm"]!!.jsonPrimitive.content.toInt(),
                 desc = describe(fact["condition"]!!.jsonPrimitive.content)
             )
-        } catch (_: Exception) { null }
+            cached = info
+            cacheTime = now
+            info
+        } catch (_: Exception) {
+            // Если не удалось — вернём старый кэш, если есть
+            cached
+        }
     }
 
     private fun describe(code: String) = when (code) {
