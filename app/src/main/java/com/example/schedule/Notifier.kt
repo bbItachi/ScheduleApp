@@ -42,13 +42,21 @@ object Notifier {
         nm.createNotificationChannel(before)
     }
 
-    // ─── Большая иконка приложения (как на iPhone) ───
-
     private fun getLargeIcon(ctx: Context): Bitmap? {
         return try {
             val drawable = ContextCompat.getDrawable(ctx, R.drawable.ic_launcher_app)
             drawable?.toBitmap(width = 128, height = 128)
         } catch (_: Exception) { null }
+    }
+
+    private fun openAppPendingIntent(ctx: Context): PendingIntent {
+        val intent = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            ctx, 777, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     private fun parseStartMinutes(time: String): Pair<Int, Int>? {
@@ -235,6 +243,7 @@ object Notifier {
                     val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
 
                     val largeIcon = getLargeIcon(ctx)
+                    val contentPi = openAppPendingIntent(ctx)
 
                     if (pairs.isEmpty()) {
                         val n = NotificationCompat.Builder(ctx, CH_MORNING)
@@ -243,22 +252,22 @@ object Notifier {
                             .setColor(0xFF3B82F6.toInt())
                             .setContentTitle("Доброе утро!")
                             .setContentText("Сегодня пар нет 🎉")
+                            .setContentIntent(contentPi)
                             .setAutoCancel(true)
                             .setGroup(GROUP_KEY)
                             .build()
                         nm.notify(1, n)
                     } else {
-                        // Стиль «Inbox» — список пар как на iPhone
                         val style = NotificationCompat.InboxStyle()
-                        for (p in pairs.take(7)) {
+                        for (p in pairs.take(10)) {
                             val subj = p.subgroups.joinToString("/") { it.subject }
-                                .let { if (it.length > 40) it.take(37) + "…" else it }
+                                .let { if (it.length > 45) it.take(42) + "…" else it }
                             style.addLine("${p.number}. ${p.time}  ·  $subj")
                         }
-                        if (pairs.size > 7) {
-                            style.setSummaryText("и ещё ${pairs.size - 7}…")
+                        if (pairs.size > 10) {
+                            style.setSummaryText("Всего ${pairs.size} пар")
                         } else {
-                            style.setSummaryText("Всего: ${pairs.size}")
+                            style.setSummaryText("Всего ${pairs.size} ${plural(pairs.size, "пара", "пары", "пар")}")
                         }
 
                         val n = NotificationCompat.Builder(ctx, CH_MORNING)
@@ -268,6 +277,7 @@ object Notifier {
                             .setContentTitle("Доброе утро! Пары на сегодня")
                             .setContentText("${pairs.size} ${plural(pairs.size, "пара", "пары", "пар")} · нажми, чтобы открыть")
                             .setStyle(style)
+                            .setContentIntent(contentPi)
                             .setAutoCancel(true)
                             .setGroup(GROUP_KEY)
                             .setShowWhen(true)
@@ -286,22 +296,23 @@ object Notifier {
                     val before = intent.getIntExtra("before", 15)
 
                     val largeIcon = getLargeIcon(ctx)
+                    val contentPi = openAppPendingIntent(ctx)
+
+                    val bigText = buildString {
+                        append(subject).append("\n\n")
+                        append("🏛  Аудитория: ").append(room).append("\n")
+                        append("👤  Преподаватель: ").append(teacher).append("\n")
+                        append("🕐  Время: ").append(time).append("\n")
+                    }
 
                     val n = NotificationCompat.Builder(ctx, CH_BEFORE)
                         .setSmallIcon(R.drawable.ic_notification)
                         .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
                         .setColor(0xFF3B82F6.toInt())
-                        .setContentTitle("Пара $num через $before мин")
+                        .setContentTitle("Через $before мин · пара $num")
                         .setContentText("$subject · ауд. $room")
-                        .setStyle(
-                            NotificationCompat.BigTextStyle()
-                                .bigText(
-                                    "$subject\n" +
-                                    "Аудитория: $room\n" +
-                                    "Преподаватель: $teacher\n" +
-                                    "Время: $time"
-                                )
-                        )
+                        .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+                        .setContentIntent(contentPi)
                         .setAutoCancel(true)
                         .setGroup(GROUP_KEY)
                         .setCategory(NotificationCompat.CATEGORY_EVENT)
