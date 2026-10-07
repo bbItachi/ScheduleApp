@@ -24,8 +24,11 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 private const val CHANNEL_URL = "https://max.ru/channel_rasp_spk"
+private const val SCHEDULE_URL = "http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx"
 
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
@@ -36,27 +39,70 @@ fun OnboardingScreen(onDone: () -> Unit) {
     var groups by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedGroup by remember { mutableStateOf<String?>(null) }
     var teacherName by remember { mutableStateOf("") }
-    var isParsing by remember { mutableStateOf(false) }
+    var isDownloading by remember { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
+    var downloadFailed by remember { mutableStateOf(false) }
 
+    // Автоскачивание расписания с сайта
+    fun autoDownload() {
+        if (isDownloading) return
+        scope.launch {
+            isDownloading = true
+            downloadFailed = false
+            statusMsg = "Скачиваем расписание с сайта…"
+            try {
+                val parsed = withContext(Dispatchers.IO) {
+                    val url = URL(SCHEDULE_URL)
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 20_000
+                        readTimeout = 45_000
+                        setRequestProperty("User-Agent", "ScheduleApp/1.7")
+                        instanceFollowRedirects = true
+                    }
+                    val result = conn.inputStream.use { XlsxParser.parse(it) }
+                    conn.disconnect()
+                    result
+                }
+                if (parsed.isEmpty()) {
+                    statusMsg = "Файл пустой"
+                    downloadFailed = true
+                } else {
+                    ScheduleStore.save(ctx, parsed)
+                    ScheduleStore.setLastAutoUpdate(ctx, System.currentTimeMillis())
+                    groups = parsed.map { it.group }.distinct().sorted()
+                    statusMsg = "Загружено! Найдено групп: ${groups.size}"
+                }
+            } catch (e: Exception) {
+                statusMsg = "Не удалось скачать: ${e.message ?: "ошибка сети"}"
+                downloadFailed = true
+            } finally {
+                isDownloading = false
+            }
+        }
+    }
+
+    // Ручная загрузка (запасной вариант)
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            isParsing = true
-            statusMsg = "Парсим файл…"
+            isDownloading = true
+            downloadFailed = false
+            statusMsg = "Обрабатываем файл…"
             try {
                 val parsed = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)!!.use { XlsxParser.parse(it) }
                 }
                 ScheduleStore.save(ctx, parsed)
                 groups = parsed.map { it.group }.distinct().sorted()
-                statusMsg = "Найдено групп: ${groups.size}"
+                statusMsg = "Загружено! Найдено групп: ${groups.size}"
             } catch (e: Exception) {
                 statusMsg = "Ошибка: ${e.message}"
+                downloadFailed = true
             } finally {
-                isParsing = false
+                isDownloading = false
             }
         }
     }
@@ -100,7 +146,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     icon = Icons.Default.School,
                     selected = role == ScheduleStore.ROLE_STUDENT,
                     modifier = Modifier.weight(1f),
-                    onClick = { role = ScheduleStore.ROLE_STUDENT }
+                    onClick = {
+                        role = ScheduleStore.ROLE_STUDENT
+                        if (groups.isEmpty() && !isDownloading) autoDownload()
+                    }
                 )
                 Spacer(Modifier.width(10.dp))
                 RoleCard(
@@ -108,62 +157,130 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     icon = Icons.Default.Person,
                     selected = role == ScheduleStore.ROLE_TEACHER,
                     modifier = Modifier.weight(1f),
-                    onClick = { role = ScheduleStore.ROLE_TEACHER }
+                    onClick = {
+                        role = ScheduleStore.ROLE_TEACHER
+                        if (groups.isEmpty() && !isDownloading) autoDownload()
+                    }
                 )
             }
 
-            if (role == ScheduleStore.ROLE_STUDENT) {
+            if (role != null) {
                 Spacer(Modifier.height(28.dp))
                 Text(
-                    "2. Загрузи расписание",
+                    "2. Расписание",
                     color = AppColors.TextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Файл .xlsx можно скачать на сайте споспк.рф",
-                    color = AppColors.TextSecondary,
-                    fontSize = 13.sp
-                )
                 Spacer(Modifier.height(10.dp))
 
-                Button(
-                    onClick = {
-                        picker.launch(arrayOf(
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            "application/vnd.ms-excel", "*/*"
-                        ))
-                    },
-                    enabled = !isParsing,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppColors.Accent,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isParsing) {
+                // Статус скачивания
+                if (isDownloading) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         CircularProgressIndicator(
-                            color = Color.White,
+                            color = AppColors.Accent,
                             strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(Modifier.width(8.dp))
-                    } else {
-                        Icon(Icons.Default.Upload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            statusMsg,
+                            color = AppColors.TextPrimary,
+                            fontSize = 14.sp
+                        )
                     }
-                    Text(if (isParsing) "Обработка…" else "Загрузить .xlsx")
+                } else if (statusMsg.isNotEmpty()) {
+                    Surface(
+                        color = if (downloadFailed) AppColors.CardElevated else AppColors.AccentSoft,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            statusMsg,
+                            color = if (downloadFailed) AppColors.TextSecondary else AppColors.Accent,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
                 }
 
-                if (statusMsg.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(statusMsg, color = AppColors.Accent, fontSize = 13.sp)
+                // Кнопки
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { autoDownload() },
+                        enabled = !isDownloading,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.Accent,
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Скачать с сайта")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            picker.launch(arrayOf(
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                "application/vnd.ms-excel", "*/*"
+                            ))
+                        },
+                        enabled = !isDownloading,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, AppColors.Border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = AppColors.TextSecondary
+                        )
+                    ) {
+                        Icon(Icons.Default.Upload, null, modifier = Modifier.size(18.dp))
+                    }
                 }
 
-                if (groups.isNotEmpty()) {
-                    Spacer(Modifier.height(18.dp))
+                // Преподаватель: поле ФИО
+                if (role == ScheduleStore.ROLE_TEACHER) {
+                    Spacer(Modifier.height(20.dp))
+                    Text(
+                        "3. Твоё ФИО",
+                        color = AppColors.TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Точно как в расписании, например: Иванов И.И.",
+                        color = AppColors.TextSecondary,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = teacherName,
+                        onValueChange = { teacherName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Лизнева К.А.") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AppColors.Accent,
+                            unfocusedBorderColor = AppColors.Border,
+                            focusedTextColor = AppColors.TextPrimary,
+                            unfocusedTextColor = AppColors.TextPrimary,
+                            focusedPlaceholderColor = AppColors.TextDim,
+                            unfocusedPlaceholderColor = AppColors.TextDim,
+                            cursorColor = AppColors.Accent
+                        )
+                    )
+                }
+
+                // Студент: выбор группы
+                if (role == ScheduleStore.ROLE_STUDENT && groups.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
                     Text(
                         "3. Выбери свою группу",
                         color = AppColors.TextPrimary,
@@ -207,125 +324,42 @@ fun OnboardingScreen(onDone: () -> Unit) {
                             }
                         }
                     }
-                }
 
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "Подпишись на канал",
-                    color = AppColors.TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Актуальная информация и изменения в расписании",
-                    color = AppColors.TextSecondary,
-                    fontSize = 13.sp
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        try {
-                            ctx.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(CHANNEL_URL))
-                            )
-                        } catch (_: Exception) { }
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, AppColors.Accent),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        Icons.Default.OpenInNew, null,
-                        tint = AppColors.Accent,
-                        modifier = Modifier.size(18.dp)
+                    Spacer(Modifier.height(20.dp))
+                    Text(
+                        "Подпишись на канал",
+                        color = AppColors.TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Открыть канал", color = AppColors.Accent,
-                        fontWeight = FontWeight.SemiBold)
-                }
-            }
-
-            if (role == ScheduleStore.ROLE_TEACHER) {
-                Spacer(Modifier.height(28.dp))
-                Text(
-                    "2. Введи своё ФИО",
-                    color = AppColors.TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Точно как в расписании, например: Сидоров И.И.",
-                    color = AppColors.TextSecondary,
-                    fontSize = 13.sp
-                )
-                Spacer(Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = teacherName,
-                    onValueChange = { teacherName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Лизнева К.А.") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AppColors.Accent,
-                        unfocusedBorderColor = AppColors.Border,
-                        focusedTextColor = AppColors.TextPrimary,
-                        unfocusedTextColor = AppColors.TextPrimary,
-                        focusedPlaceholderColor = AppColors.TextDim,
-                        unfocusedPlaceholderColor = AppColors.TextDim,
-                        cursorColor = AppColors.Accent
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Актуальная информация и изменения в расписании",
+                        color = AppColors.TextSecondary,
+                        fontSize = 13.sp
                     )
-                )
-
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "3. Загрузи расписание",
-                    color = AppColors.TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Файл .xlsx можно скачать на сайте споспк.рф",
-                    color = AppColors.TextSecondary,
-                    fontSize = 13.sp
-                )
-                Spacer(Modifier.height(10.dp))
-
-                Button(
-                    onClick = {
-                        picker.launch(arrayOf(
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            "application/vnd.ms-excel", "*/*"
-                        ))
-                    },
-                    enabled = !isParsing,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppColors.Accent,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isParsing) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            strokeWidth = 2.dp,
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                ctx.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(CHANNEL_URL))
+                                )
+                            } catch (_: Exception) { }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, AppColors.Accent),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Default.OpenInNew, null,
+                            tint = AppColors.Accent,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
-                    } else {
-                        Icon(Icons.Default.Upload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
+                        Text("Открыть канал", color = AppColors.Accent,
+                            fontWeight = FontWeight.SemiBold)
                     }
-                    Text(if (isParsing) "Обработка…" else "Загрузить .xlsx")
-                }
-                if (statusMsg.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(statusMsg, color = AppColors.Accent, fontSize = 13.sp)
                 }
             }
 

@@ -32,11 +32,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.IDN
 import java.text.SimpleDateFormat
 import java.util.*
-
-private const val CHANNEL_URL = "https://max.ru/channel_rasp_spk"
 
 // ═══════════════════════════════════════════════════════════
 //  ОБЩИЕ КОМПОНЕНТЫ
@@ -424,19 +421,10 @@ fun TodayScreen() {
             ) {
                 Spacer(Modifier.weight(1f))
 
-                CircleIconButton(
-                    icon = Icons.Default.Upload,
-                    filled = true,
-                    onClick = {
-                        picker.launch(arrayOf(
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            "application/vnd.ms-excel", "*/*"
-                        ))
-                    }
-                )
-                Spacer(Modifier.width(4.dp))
+                // Кнопка «Обновить» — простая
                 CircleIconButton(
                     icon = Icons.Default.Refresh,
+                    filled = false,
                     onClick = {
                         scope.launch {
                             withContext(Dispatchers.IO) {
@@ -449,14 +437,16 @@ fun TodayScreen() {
                     }
                 )
                 Spacer(Modifier.width(4.dp))
+
+                // Кнопка «Загрузить .xlsx» — простая (без синей заливки)
                 CircleIconButton(
-                    icon = Icons.Default.Download,
+                    icon = Icons.Default.Upload,
+                    filled = false,
                     onClick = {
-                        try {
-                            val host = IDN.toASCII("споспк.рф")
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://$host/"))
-                            ctx.startActivity(intent)
-                        } catch (_: Exception) { }
+                        picker.launch(arrayOf(
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel", "*/*"
+                        ))
                     }
                 )
             }
@@ -1038,7 +1028,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        "Версия 1.6" + if (debugMode) "  🐛 DEBUG" else "",
+                        "Версия 1.7" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)

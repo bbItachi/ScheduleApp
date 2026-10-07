@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,10 +40,23 @@ class MainActivity : ComponentActivity() {
         ScheduleUpdater.schedule(this, enabled)
         ScheduleWidget.updateAll(this)
 
+        // Автообновление при старте: если расписание отсутствует или старше 1 дня
+        maybeAutoUpdate()
+
         setContent {
             MaterialTheme(colorScheme = ScheduleDarkScheme) {
                 RootApp()
             }
+        }
+    }
+
+    private fun maybeAutoUpdate() {
+        val last = ScheduleStore.lastAutoUpdate(this)
+        val hasData = ScheduleStore.load(this)?.pairs?.isNotEmpty() == true
+        val ageMs = System.currentTimeMillis() - last
+        val oneDayMs = 24 * 60 * 60 * 1000L
+        if (!hasData || last == 0L || ageMs > oneDayMs) {
+            ScheduleUpdater.runNow(this)
         }
     }
 }
