@@ -17,13 +17,22 @@
         android:text="Сегодня · ПН" />
 
     <TextView
-        android:id="@+id/widget_time"
+        android:id="@+id/widget_countdown"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textColor="#3B82F6"
-        android:textSize="16sp"
+        android:textSize="13sp"
         android:textStyle="bold"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
+        android:text="через 25 мин" />
+
+    <TextView
+        android:id="@+id/widget_time"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#A8C0E0"
+        android:textSize="13sp"
+        android:layout_marginTop="2dp"
         android:text="8.30-10.05" />
 
     <TextView
