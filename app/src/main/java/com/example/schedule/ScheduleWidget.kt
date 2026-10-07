@@ -58,7 +58,8 @@ class ScheduleWidget : AppWidgetProvider() {
 
             if (group.isEmpty()) {
                 views.setTextViewText(R.id.widget_header, "Расписание СПК")
-                views.setTextViewText(R.id.widget_time, "Открой приложение")
+                views.setTextViewText(R.id.widget_countdown, "Открой приложение")
+                views.setTextViewText(R.id.widget_time, "")
                 views.setTextViewText(R.id.widget_subject, "Выбери группу и загрузи расписание")
                 views.setTextViewText(R.id.widget_room, "")
                 views.setTextViewText(R.id.widget_footer, "Нажми, чтобы открыть")
@@ -74,7 +75,8 @@ class ScheduleWidget : AppWidgetProvider() {
             views.setTextViewText(R.id.widget_header, "Сегодня · ${shortDay(dayName)} · $weekLabel")
 
             if (pairs.isEmpty()) {
-                views.setTextViewText(R.id.widget_time, "Пар нет 🎉")
+                views.setTextViewText(R.id.widget_countdown, "Пар нет 🎉")
+                views.setTextViewText(R.id.widget_time, "")
                 views.setTextViewText(R.id.widget_subject, "Отдыхай!")
                 views.setTextViewText(R.id.widget_room, "")
                 views.setTextViewText(R.id.widget_footer, "Группа $group")
@@ -83,7 +85,6 @@ class ScheduleWidget : AppWidgetProvider() {
 
             val nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
 
-            // Ищем текущую или ближайшую пару
             var current: Lesson? = null
             var next: Lesson? = null
             var upcomingCount = 0
@@ -107,18 +108,44 @@ class ScheduleWidget : AppWidgetProvider() {
                 val rooms = target.subgroups.joinToString(" / ") { it.room }
                 val teachers = target.subgroups.joinToString(" / ") { it.teacher }
 
+                // ─── Строка отсчёта ───
+                val countdownText: String
+                if (current != null) {
+                    val e = ScheduleStore.timeToMinutes(current.time.substringAfter("-")) ?: 0
+                    val left = (e - nowMin).coerceAtLeast(0)
+                    countdownText = if (left > 60) {
+                        val h = left / 60
+                        val m = left % 60
+                        "Идёт · до конца ${h} ч ${m} мин"
+                    } else {
+                        "Идёт · до конца $left мин"
+                    }
+                } else {
+                    val s = ScheduleStore.timeToMinutes(next!!.time.substringBefore("-")) ?: nowMin
+                    val diff = (s - nowMin).coerceAtLeast(0)
+                    countdownText = if (diff > 60) {
+                        val h = diff / 60
+                        val m = diff % 60
+                        "Через ${h} ч ${m} мин"
+                    } else {
+                        "Через $diff мин"
+                    }
+                }
+                views.setTextViewText(R.id.widget_countdown, countdownText)
+
                 views.setTextViewText(R.id.widget_time, target.time)
                 views.setTextViewText(R.id.widget_subject, subj.take(60))
                 views.setTextViewText(R.id.widget_room, "Ауд. $rooms · $teachers".take(50))
 
-                val footer = when {
-                    current != null -> "Идёт сейчас · всего ${pairs.size} пар"
-                    upcomingCount > 0 -> "До пары · всего сегодня ${pairs.size}"
-                    else -> "Всего сегодня ${pairs.size}"
+                val footer = if (upcomingCount > 0) {
+                    "Осталось сегодня: $upcomingCount · всего ${pairs.size}"
+                } else {
+                    "Всего сегодня ${pairs.size} пар"
                 }
                 views.setTextViewText(R.id.widget_footer, footer)
             } else {
-                views.setTextViewText(R.id.widget_time, "Пары закончились")
+                views.setTextViewText(R.id.widget_countdown, "Пары закончились")
+                views.setTextViewText(R.id.widget_time, "")
                 views.setTextViewText(R.id.widget_subject, "Свободен!")
                 views.setTextViewText(R.id.widget_room, "")
                 views.setTextViewText(R.id.widget_footer, "Сегодня было ${pairs.size} пар")
