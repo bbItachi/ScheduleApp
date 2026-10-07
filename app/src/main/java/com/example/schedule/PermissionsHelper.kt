@@ -60,8 +60,6 @@ object PermissionsHelper {
         } catch (_: Exception) { }
     }
 
-    // ─── Не беспокоить ───
-
     fun hasDndAccess(ctx: Context): Boolean {
         return try {
             val nm = ctx.getSystemService(NotificationManager::class.java)

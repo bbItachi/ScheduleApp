@@ -34,18 +34,29 @@ class MainActivity : ComponentActivity() {
         Notifier.ensureChannels(this)
         RescheduleWorker.schedule(this)
 
-        // Автообновление: включаем, если пользователь его разрешил
         val enabled = ScheduleStore.autoUpdate(this)
         ScheduleUpdater.schedule(this, enabled)
-
-        // Обновить виджет при старте
         ScheduleWidget.updateAll(this)
 
         setContent {
             MaterialTheme(colorScheme = ScheduleDarkScheme) {
-                App()
+                RootApp()
             }
         }
+    }
+}
+
+@Composable
+fun RootApp() {
+    val ctx = LocalContext.current
+    var showOnboarding by remember {
+        mutableStateOf(ScheduleStore.role(ctx).isEmpty())
+    }
+
+    if (showOnboarding) {
+        OnboardingScreen(onDone = { showOnboarding = false })
+    } else {
+        App()
     }
 }
 

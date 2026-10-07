@@ -39,7 +39,6 @@ object XlsxParser {
         val maxRow = cells.keys.maxOf { rowOf(it) }
         val maxCol = cells.keys.maxOf { colOf(it) }
 
-        // Найти строку "Группа:"
         var groupRow = -1
         for (r in 1..maxRow) {
             for (c in 1..maxCol) {
@@ -52,7 +51,6 @@ object XlsxParser {
         }
         if (groupRow < 0) error("Не найдена строка с группами")
 
-        // Собрать все группы
         val groups = mutableListOf<Pair<Int, String>>()
         for (c in 1..maxCol) {
             val v = cell(cells, groupRow, c).trim()
@@ -70,7 +68,6 @@ object XlsxParser {
         var week = WeekType.ODD
 
         for (r in (groupRow + 1)..maxRow) {
-            // Ищем метку "ЧЕТНАЯ НЕДЕЛЯ" в любой колонке
             for (c in 1..maxCol) {
                 val v = cell(cells, r, c)
                 if (v.contains("ЧЕТНАЯ", true) || v.contains("ЧЁТНАЯ", true)) {
@@ -91,11 +88,9 @@ object XlsxParser {
             for (i in groups.indices) {
                 val (colStart, groupName) = groups[i]
 
-                // Читаем 4 ячейки данных и 4 ячейки преподавателей
                 val rowCells = (0..3).map { cell(cells, r, colStart + it).trim() }
                 val teachCells = (0..3).map { cell(cells, r + 1, colStart + it).trim() }
 
-                // Классифицируем содержимое каждой ячейки
                 val subjectPos = mutableListOf<Int>()
                 val roomPos = mutableListOf<Int>()
                 for (k in 0..3) {
@@ -107,7 +102,6 @@ object XlsxParser {
                 val subs = mutableListOf<SubgroupPair>()
 
                 if (subjectPos.size >= 2 && roomPos.size >= 2) {
-                    // Две подгруппы: каждая со своим предметом и аудиторией
                     for (k in 0..1) {
                         val si = subjectPos[k]
                         val ri = roomPos[k]
@@ -116,7 +110,6 @@ object XlsxParser {
                         subs += SubgroupPair(k + 1, rowCells[si], teacher, rowCells[ri])
                     }
                 } else if (subjectPos.size == 1) {
-                    // Один предмет (для всей группы)
                     val si = subjectPos[0]
                     val ri = roomPos.firstOrNull()
                     val teacher = teachCells.getOrElse(si) { "" }
@@ -128,7 +121,6 @@ object XlsxParser {
                         if (ri != null) rowCells[ri] else ""
                     )
                 } else if (subjectPos.size >= 2) {
-                    // Два предмета, одна аудитория на всех
                     val room = roomPos.firstOrNull()?.let { rowCells[it] } ?: ""
                     for (k in 0..1) {
                         val si = subjectPos[k]
@@ -145,26 +137,16 @@ object XlsxParser {
         return result
     }
 
-    /**
-     * Эвристика: ячейка похожа на аудиторию?
-     * Примеры аудиторий: "316/2", "110", "ЦРК", "СЗ", "203/М", "онлайн"
-     */
     private fun looksLikeRoom(v: String): Boolean {
         if (v.isEmpty()) return false
         val t = v.trim()
         val upper = t.uppercase()
-
-        // Известные "онлайн-аудитории"
         if (upper in KNOWN_ROOMS) return true
         if (upper.startsWith("СЗ/") || upper.startsWith("М/")) return true
         if (upper.startsWith("ЦРК")) return true
-
-        // Есть цифры и мало букв → похоже на номер аудитории
         val digits = t.count { it.isDigit() }
         val letters = t.count { it.isLetter() }
-        if (digits >= 1 && letters <= 2 && t.length <= 10 && !t.contains(' ')) return true
-
-        return false
+        return digits >= 1 && letters <= 2 && t.length <= 10 && !t.contains(' ')
     }
 
     private fun parseSharedStrings(bytes: ByteArray): List<String> {
@@ -197,19 +179,16 @@ object XlsxParser {
     }
 
     private fun rowOf(ref: String): Int = ref.dropWhile { !it.isDigit() }.toIntOrNull() ?: 0
-
     private fun colOf(ref: String): Int {
         var n = 0
         for (c in ref) { if (c.isDigit()) break; n = n * 26 + (c.uppercaseChar() - 'A' + 1) }
         return n
     }
-
     private fun colLetter(col: Int): String {
         var n = col; val sb = StringBuilder()
         while (n > 0) { n--; sb.insert(0, ('A' + (n % 26))); n /= 26 }
         return sb.toString()
     }
-
     private fun cell(cells: Map<String, String>, row: Int, col: Int): String =
         cells[colLetter(col) + row] ?: ""
 }

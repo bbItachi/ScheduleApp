@@ -15,6 +15,7 @@ class RescheduleWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, par
         return try {
             Notifier.scheduleMorning(applicationContext)
             Notifier.scheduleBeforePairs(applicationContext)
+            Notifier.scheduleDnd(applicationContext)
             Result.success()
         } catch (_: Exception) {
             Result.retry()

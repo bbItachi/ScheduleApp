@@ -2,8 +2,6 @@ package com.example.schedule
 
 import android.content.Context
 import androidx.work.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -19,7 +17,7 @@ class ScheduleUpdater(ctx: Context, params: WorkerParameters) : Worker(ctx, para
                 requestMethod = "GET"
                 connectTimeout = 30_000
                 readTimeout = 60_000
-                setRequestProperty("User-Agent", "ScheduleApp/1.5")
+                setRequestProperty("User-Agent", "ScheduleApp/1.6")
                 instanceFollowRedirects = true
             }
 
@@ -31,10 +29,8 @@ class ScheduleUpdater(ctx: Context, params: WorkerParameters) : Worker(ctx, para
             ScheduleStore.save(ctx, parsed)
             ScheduleStore.setLastAutoUpdate(ctx, System.currentTimeMillis())
 
-            // Обновить виджет
             ScheduleWidget.updateAll(ctx)
 
-            // Перепланировать уведомления
             Notifier.scheduleBeforePairs(ctx)
             Notifier.scheduleDnd(ctx)
 

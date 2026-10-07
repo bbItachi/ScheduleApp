@@ -12,7 +12,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -37,26 +36,11 @@ import java.net.IDN
 import java.text.SimpleDateFormat
 import java.util.*
 
+private const val CHANNEL_URL = "https://max.ru/channel_rasp_spk"
+
 // ═══════════════════════════════════════════════════════════
 //  ОБЩИЕ КОМПОНЕНТЫ
 // ═══════════════════════════════════════════════════════════
-
-@Composable
-fun AppFilterChip(selected: Boolean, onClick: () -> Unit, label: String) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label, fontSize = 13.sp) },
-        shape = RoundedCornerShape(20.dp),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = AppColors.Card,
-            labelColor = AppColors.TextSecondary,
-            selectedContainerColor = AppColors.Accent,
-            selectedLabelColor = Color.White
-        ),
-        border = BorderStroke(1.dp, if (selected) AppColors.Accent else AppColors.Border)
-    )
-}
 
 @Composable
 fun CircleIconButton(
@@ -167,8 +151,10 @@ fun DateClockView() {
     }
 
     Column {
-        Text(dateText, color = AppColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Text(timeText, color = AppColors.TextSecondary, fontSize = 12.sp)
+        Text(dateText, color = AppColors.TextPrimary, fontSize = 16.sp,
+            fontWeight = FontWeight.Bold)
+        Text(timeText, color = AppColors.Accent, fontSize = 22.sp,
+            fontWeight = FontWeight.Bold)
     }
 }
 
@@ -256,59 +242,6 @@ fun SkeletonList() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ДИАЛОГ ПРЕПОДАВАТЕЛЯ
-// ═══════════════════════════════════════════════════════════
-
-@Composable
-fun TeacherDialog(teacher: String, onDismiss: () -> Unit) {
-    val ctx = LocalContext.current
-    val lessons = remember(teacher) { ScheduleStore.lessonsByTeacher(ctx, teacher) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(teacher, color = AppColors.TextPrimary, fontSize = 16.sp) },
-        text = {
-            if (lessons.isEmpty()) {
-                Text("Нет пар", color = AppColors.TextSecondary)
-            } else {
-                LazyColumn(Modifier.heightIn(max = 500.dp)) {
-                    itemsIndexed(
-                        items = lessons,
-                        key = { index, _ -> "lesson_$index" }
-                    ) { _, l ->
-                        Column(Modifier.padding(vertical = 6.dp)) {
-                            val weekLabel = if (l.week == WeekType.EVEN) "чёт" else "нечёт"
-                            Text(
-                                "${l.day} · $weekLabel · ${l.number} пара",
-                                color = AppColors.Accent, fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            val subj = l.subgroups
-                                .firstOrNull { it.teacher.contains(teacher, true) }
-                                ?.subject
-                                ?: l.subgroups.firstOrNull()?.subject ?: ""
-                            Text(subj, color = AppColors.TextPrimary, fontSize = 13.sp)
-                            val room = l.subgroups.firstOrNull()?.room ?: "—"
-                            Text(
-                                "${l.time} · ауд. $room · гр. ${l.group}",
-                                color = AppColors.TextSecondary, fontSize = 12.sp
-                            )
-                        }
-                        Divider(color = AppColors.Divider)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Закрыть", color = AppColors.Accent)
-            }
-        },
-        containerColor = AppColors.Card
-    )
-}
-
-// ═══════════════════════════════════════════════════════════
 //  ЭКРАН «СЕГОДНЯ»
 // ═══════════════════════════════════════════════════════════
 
@@ -317,83 +250,34 @@ fun TodayScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val isTeacher = ScheduleStore.isTeacher(ctx)
+    val teacherName = ScheduleStore.teacherName(ctx)
+
     var pairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
     var week by remember { mutableStateOf(ScheduleStore.currentWeek(ctx)) }
-    var weather by remember { mutableStateOf<Weather.Info?>(null) }
     var status by remember { mutableStateOf("") }
     var favorites by remember { mutableStateOf<Set<String>>(ScheduleStore.favorites(ctx)) }
     var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
     var isLoading by remember { mutableStateOf(false) }
     var notesMap by remember { mutableStateOf<Map<String, String>>(buildNotesMap(ctx)) }
 
-    var showImportGroupPicker by remember { mutableStateOf(false) }
-    var importGroups by remember { mutableStateOf<List<String>>(emptyList()) }
-    var pendingParsed by remember { mutableStateOf<List<Lesson>>(emptyList()) }
-    var teacherDialog by remember { mutableStateOf<String?>(null) }
-
     EnsureNotificationPermission()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            week = ScheduleStore.currentWeek(ctx)
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
 
     LaunchedEffect(week) {
         pairs = withContext(Dispatchers.IO) {
-            ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
+            if (isTeacher) {
+                ScheduleStore.pairsForTeacher(ctx, ScheduleStore.dayNameRu(), week, teacherName)
+            } else {
+                ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
+            }
         }
-    }
-    LaunchedEffect(Unit) {
-        weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
-    }
-
-    teacherDialog?.let { TeacherDialog(it) { teacherDialog = null } }
-
-    if (showImportGroupPicker) {
-        AlertDialog(
-            onDismissRequest = { showImportGroupPicker = false },
-            title = { Text("Выбор группы", color = AppColors.TextPrimary) },
-            text = {
-                Column {
-                    Text(
-                        "Найдено групп: ${importGroups.size}. Выбери свою.",
-                        color = AppColors.TextSecondary, fontSize = 13.sp
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    LazyColumn(Modifier.heightIn(max = 400.dp)) {
-                        items(importGroups, key = { it }) { g ->
-                            val current = ScheduleStore.group(ctx)
-                            Surface(
-                                color = if (g == current) AppColors.AccentSoft else Color.Transparent,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    ScheduleStore.setGroup(ctx, g)
-                                    ScheduleStore.save(ctx, pendingParsed)
-                                    pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
-                                    status = "Группа $g · пар: ${pendingParsed.size}"
-                                    scope.launch(Dispatchers.IO) {
-                                        Notifier.scheduleBeforePairs(ctx)
-                                        Notifier.scheduleDnd(ctx)
-                                        ScheduleWidget.updateAll(ctx)
-                                    }
-                                    showImportGroupPicker = false
-                                }
-                            ) {
-                                Text(
-                                    g,
-                                    color = if (g == current) AppColors.Accent else AppColors.TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showImportGroupPicker = false }) {
-                    Text("Отмена", color = AppColors.TextSecondary)
-                }
-            },
-            containerColor = AppColors.Card
-        )
     }
 
     val picker = rememberLauncherForActivityResult(
@@ -407,25 +291,17 @@ fun TodayScreen() {
                 val parsed = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)!!.use { XlsxParser.parse(it) }
                 }
-                val groupsInFile = parsed.map { it.group }.distinct().sorted()
-
-                if (groupsInFile.isEmpty()) {
-                    status = "В файле не найдено групп"
-                } else if (groupsInFile.size == 1) {
-                    ScheduleStore.save(ctx, parsed)
-                    ScheduleStore.setGroup(ctx, groupsInFile[0])
-                    pairs = ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
-                    status = "Загружено пар: ${parsed.size}, группа: ${groupsInFile[0]}"
-                    withContext(Dispatchers.IO) {
-                        Notifier.scheduleBeforePairs(ctx)
-                        Notifier.scheduleDnd(ctx)
-                        ScheduleWidget.updateAll(ctx)
-                    }
+                ScheduleStore.save(ctx, parsed)
+                pairs = if (isTeacher) {
+                    ScheduleStore.pairsForTeacher(ctx, ScheduleStore.dayNameRu(), week, teacherName)
                 } else {
-                    pendingParsed = parsed
-                    importGroups = groupsInFile
-                    showImportGroupPicker = true
-                    status = "Найдено групп: ${groupsInFile.size}"
+                    ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
+                }
+                status = "Загружено пар: ${parsed.size}"
+                withContext(Dispatchers.IO) {
+                    Notifier.scheduleBeforePairs(ctx)
+                    Notifier.scheduleDnd(ctx)
+                    ScheduleWidget.updateAll(ctx)
                 }
             } catch (e: Exception) {
                 status = "Ошибка: ${e.message}"
@@ -437,6 +313,7 @@ fun TodayScreen() {
 
     val dayName = ScheduleStore.dayNameRu()
     val group = ScheduleStore.group(ctx)
+    val weekLabel = if (week == WeekType.EVEN) "чётная" else "нечётная"
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
 
@@ -453,25 +330,24 @@ fun TodayScreen() {
                 Box(Modifier.weight(1f)) {
                     DateClockView()
                 }
-                if (weather != null) {
-                    val w = weather!!
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Surface(
+                        color = AppColors.AccentSoft,
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
                         Text(
-                            "${w.temp}°", color = AppColors.Accent,
-                            fontSize = 32.sp, fontWeight = FontWeight.Bold
+                            weekLabel,
+                            color = AppColors.Accent, fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                         )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(w.desc, color = AppColors.TextPrimary, fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium)
-                            Text(
-                                "ощущ. ${w.feelsLike}° · 💨${w.wind} · 💧${w.humidity}%",
-                                color = AppColors.TextSecondary, fontSize = 11.sp
-                            )
-                        }
                     }
-                } else {
-                    Text("Загрузка…", color = AppColors.TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (isTeacher) teacherName else group.ifEmpty { "группа не выбрана" },
+                        color = AppColors.TextSecondary, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -480,25 +356,10 @@ fun TodayScreen() {
 
         Spacer(Modifier.height(10.dp))
 
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(dayName, color = AppColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "(${if (week == WeekType.EVEN) "чётная" else "нечётная"})",
-                color = AppColors.TextSecondary, fontSize = 13.sp,
-                modifier = Modifier.padding(bottom = 2.dp)
-            )
-            Spacer(Modifier.weight(1f))
-            if (group.isNotEmpty()) {
-                Surface(color = AppColors.AccentSoft, shape = RoundedCornerShape(20.dp)) {
-                    Text(
-                        group, color = AppColors.Accent, fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                    )
-                }
-            }
-        }
+        Text(
+            "$dayName ($weekLabel)",
+            color = AppColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold
+        )
 
         Spacer(Modifier.height(8.dp))
 
@@ -530,6 +391,7 @@ fun TodayScreen() {
                             isFavorite = key in favorites,
                             isSkipped = key in skipped,
                             note = notesMap[key] ?: "",
+                            showGroup = isTeacher,
                             onToggleFavorite = {
                                 ScheduleStore.toggleFavorite(ctx, key)
                                 favorites = ScheduleStore.favorites(ctx)
@@ -542,8 +404,7 @@ fun TodayScreen() {
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
                                 notesMap = buildNotesMap(ctx)
-                            },
-                            onTeacherClick = { teacherDialog = it }
+                            }
                         )
                     }
                 }
@@ -561,34 +422,6 @@ fun TodayScreen() {
                 Modifier.fillMaxWidth().padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppFilterChip(
-                    selected = week == WeekType.ODD,
-                    onClick = {
-                        week = WeekType.ODD
-                        ScheduleStore.setCurrentWeek(ctx, WeekType.ODD)
-                        scope.launch(Dispatchers.IO) {
-                            Notifier.scheduleBeforePairs(ctx)
-                            Notifier.scheduleDnd(ctx)
-                            ScheduleWidget.updateAll(ctx)
-                        }
-                    },
-                    label = "Нечётная"
-                )
-                Spacer(Modifier.width(4.dp))
-                AppFilterChip(
-                    selected = week == WeekType.EVEN,
-                    onClick = {
-                        week = WeekType.EVEN
-                        ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN)
-                        scope.launch(Dispatchers.IO) {
-                            Notifier.scheduleBeforePairs(ctx)
-                            Notifier.scheduleDnd(ctx)
-                            ScheduleWidget.updateAll(ctx)
-                        }
-                    },
-                    label = "Чётная"
-                )
-
                 Spacer(Modifier.weight(1f))
 
                 CircleIconButton(
@@ -606,7 +439,6 @@ fun TodayScreen() {
                     icon = Icons.Default.Refresh,
                     onClick = {
                         scope.launch {
-                            weather = withContext(Dispatchers.IO) { Weather.fetch(force = true) }
                             withContext(Dispatchers.IO) {
                                 Notifier.scheduleBeforePairs(ctx)
                                 Notifier.scheduleDnd(ctx)
@@ -640,6 +472,9 @@ fun TodayScreen() {
 fun WeekScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val isTeacher = ScheduleStore.isTeacher(ctx)
+    val teacherName = ScheduleStore.teacherName(ctx)
+
     var week by remember { mutableStateOf(ScheduleStore.currentWeek(ctx)) }
     var search by remember { mutableStateOf("") }
     var showOnlyFavorites by remember { mutableStateOf(false) }
@@ -648,17 +483,25 @@ fun WeekScreen() {
     var skipped by remember { mutableStateOf<Set<String>>(ScheduleStore.skipped(ctx)) }
     var notesMap by remember { mutableStateOf<Map<String, String>>(buildNotesMap(ctx)) }
     var allPairs by remember { mutableStateOf<List<Lesson>>(emptyList()) }
-    var teacherDialog by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(week) {
-        val g = ScheduleStore.group(ctx)
-        allPairs = withContext(Dispatchers.IO) {
-            ScheduleStore.load(ctx)?.pairs
-                ?.filter { it.group == g && it.week == week } ?: emptyList()
+    LaunchedEffect(Unit) {
+        while (true) {
+            week = ScheduleStore.currentWeek(ctx)
+            kotlinx.coroutines.delay(60_000)
         }
     }
 
-    teacherDialog?.let { TeacherDialog(it) { teacherDialog = null } }
+    LaunchedEffect(week) {
+        allPairs = withContext(Dispatchers.IO) {
+            if (isTeacher) {
+                ScheduleStore.allPairsForTeacher(ctx, week, teacherName)
+            } else {
+                val g = ScheduleStore.group(ctx)
+                ScheduleStore.load(ctx)?.pairs
+                    ?.filter { it.group == g && it.week == week } ?: emptyList()
+            }
+        }
+    }
 
     val days = listOf("ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА")
 
@@ -668,7 +511,8 @@ fun WeekScreen() {
                 p.subgroups.any { sg ->
                     sg.subject.contains(search, true) ||
                     sg.teacher.contains(search, true) ||
-                    sg.room.contains(search, true)
+                    sg.room.contains(search, true) ||
+                    (isTeacher && p.group.contains(search, true))
                 }
             val matchFav = !showOnlyFavorites ||
                 "${p.group}|${p.day}|${p.week}|${p.number}" in favorites
@@ -677,23 +521,33 @@ fun WeekScreen() {
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Расписание на неделю", color = AppColors.TextPrimary,
-            fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Неделя",
+                color = AppColors.TextPrimary,
+                fontSize = 20.sp, fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.width(10.dp))
+            Surface(
+                color = AppColors.AccentSoft,
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text(
+                    if (week == WeekType.EVEN) "чётная" else "нечётная",
+                    color = AppColors.Accent, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            }
+        }
         Spacer(Modifier.height(10.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AppFilterChip(
-                selected = week == WeekType.ODD,
-                onClick = { week = WeekType.ODD; ScheduleStore.setCurrentWeek(ctx, WeekType.ODD) },
-                label = "Нечётная"
+            Text(
+                if (isTeacher) teacherName else ScheduleStore.group(ctx).ifEmpty { "группа" },
+                color = AppColors.TextSecondary, fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(Modifier.width(6.dp))
-            AppFilterChip(
-                selected = week == WeekType.EVEN,
-                onClick = { week = WeekType.EVEN; ScheduleStore.setCurrentWeek(ctx, WeekType.EVEN) },
-                label = "Чётная"
-            )
-            Spacer(Modifier.weight(1f))
             FilterChip(
                 selected = showOnlyFavorites,
                 onClick = { showOnlyFavorites = !showOnlyFavorites },
@@ -758,6 +612,7 @@ fun WeekScreen() {
                             isFavorite = key in favorites,
                             isSkipped = key in skipped,
                             note = notesMap[key] ?: "",
+                            showGroup = isTeacher,
                             onToggleFavorite = {
                                 ScheduleStore.toggleFavorite(ctx, key)
                                 favorites = ScheduleStore.favorites(ctx)
@@ -770,8 +625,7 @@ fun WeekScreen() {
                             onNoteChanged = { newText ->
                                 ScheduleStore.setNote(ctx, key, newText)
                                 notesMap = buildNotesMap(ctx)
-                            },
-                            onTeacherClick = { teacherDialog = it }
+                            }
                         )
                     }
                     if (dayPairs.isEmpty()) {
@@ -823,18 +677,22 @@ fun DayHeader(day: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
 fun SettingsScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val isTeacher = ScheduleStore.isTeacher(ctx)
+
     var group by remember { mutableStateOf(ScheduleStore.group(ctx)) }
     var groups by remember { mutableStateOf<List<String>>(ScheduleStore.allGroups(ctx)) }
+    var teacherName by remember { mutableStateOf(ScheduleStore.teacherName(ctx)) }
     var morningH by remember { mutableStateOf(ScheduleStore.morningHour(ctx)) }
     var morningM by remember { mutableStateOf(ScheduleStore.morningMinute(ctx)) }
     var beforeMin by remember { mutableStateOf(ScheduleStore.beforeMinutes(ctx)) }
-    var autoWeek by remember { mutableStateOf(ScheduleStore.autoWeek(ctx)) }
     var dndEnabled by remember { mutableStateOf(ScheduleStore.dndEnabled(ctx)) }
     var autoUpdate by remember { mutableStateOf(ScheduleStore.autoUpdate(ctx)) }
     var lastUpdate by remember { mutableStateOf(ScheduleStore.lastAutoUpdate(ctx)) }
     var updateStatus by remember { mutableStateOf("") }
     var isUpdating by remember { mutableStateOf(false) }
     var showGroupDialog by remember { mutableStateOf(false) }
+    var showTeacherDialog by remember { mutableStateOf(false) }
+    var teacherInput by remember { mutableStateOf(teacherName) }
     var debugMode by remember { mutableStateOf(false) }
     var totalPairs by remember { mutableStateOf(0) }
 
@@ -889,6 +747,48 @@ fun SettingsScreen() {
         )
     }
 
+    if (showTeacherDialog) {
+        AlertDialog(
+            onDismissRequest = { showTeacherDialog = false },
+            title = { Text("ФИО преподавателя", color = AppColors.TextPrimary) },
+            text = {
+                OutlinedTextField(
+                    value = teacherInput,
+                    onValueChange = { teacherInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Лизнева К.А.") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AppColors.Accent,
+                        unfocusedBorderColor = AppColors.Border,
+                        focusedTextColor = AppColors.TextPrimary,
+                        unfocusedTextColor = AppColors.TextPrimary,
+                        focusedPlaceholderColor = AppColors.TextDim,
+                        unfocusedPlaceholderColor = AppColors.TextDim,
+                        cursorColor = AppColors.Accent
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    ScheduleStore.setTeacherName(ctx, teacherInput.trim())
+                    teacherName = teacherInput.trim()
+                    showTeacherDialog = false
+                    scope.launch(Dispatchers.IO) {
+                        Notifier.scheduleBeforePairs(ctx)
+                        ScheduleWidget.updateAll(ctx)
+                    }
+                }) { Text("Сохранить", color = AppColors.Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTeacherDialog = false }) {
+                    Text("Отмена", color = AppColors.TextSecondary)
+                }
+            },
+            containerColor = AppColors.Card
+        )
+    }
+
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Настройки", color = AppColors.TextPrimary,
             fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -897,8 +797,17 @@ fun SettingsScreen() {
         LazyColumn(Modifier.fillMaxSize()) {
 
             item(key = "sec_main") { SectionTitle("Основное") }
-            item(key = "group") {
-                SettingRow("Группа", group.ifEmpty { "не выбрана" }) { showGroupDialog = true }
+            if (isTeacher) {
+                item(key = "teacher_name") {
+                    SettingRow("Моё ФИО", teacherName.ifEmpty { "не указано" }) {
+                        teacherInput = teacherName
+                        showTeacherDialog = true
+                    }
+                }
+            } else {
+                item(key = "group") {
+                    SettingRow("Группа", group.ifEmpty { "не выбрана" }) { showGroupDialog = true }
+                }
             }
             item(key = "mh") {
                 SettingRow("Утренняя сводка (часы)", "%02d".format(morningH)) {
@@ -923,39 +832,7 @@ fun SettingsScreen() {
                     scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                 }
             }
-            item(key = "aw") {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Авто-определение недели", color = AppColors.TextPrimary, fontSize = 16.sp)
-                        Text("Требуется дата начала семестра",
-                            color = AppColors.TextSecondary, fontSize = 12.sp)
-                    }
-                    Switch(
-                        checked = autoWeek,
-                        onCheckedChange = {
-                            autoWeek = it
-                            ScheduleStore.setAutoWeek(ctx, it)
-                            scope.launch(Dispatchers.IO) {
-                                Notifier.scheduleBeforePairs(ctx)
-                                Notifier.scheduleDnd(ctx)
-                            }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = AppColors.Accent,
-                            uncheckedThumbColor = AppColors.TextDim,
-                            uncheckedTrackColor = AppColors.CardElevated,
-                            uncheckedBorderColor = AppColors.Border
-                        )
-                    )
-                }
-                Divider(color = AppColors.Divider)
-            }
 
-            // ═══ Автообновление ═══
             item(key = "sec_auto") {
                 Spacer(Modifier.height(16.dp))
                 SectionTitle("Автообновление с сайта колледжа")
@@ -1017,7 +894,6 @@ fun SettingsScreen() {
                                 withContext(Dispatchers.IO) {
                                     ScheduleUpdater.runNow(ctx)
                                 }
-                                // Ждём немного и обновляем UI
                                 kotlinx.coroutines.delay(3000)
                                 lastUpdate = ScheduleStore.lastAutoUpdate(ctx)
                                 totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
@@ -1162,7 +1038,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        "Версия 1.5" + if (debugMode) "  🐛 DEBUG" else "",
+                        "Версия 1.6" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -1181,16 +1057,15 @@ fun SettingsScreen() {
                             Text("🐛 Отладочная информация", color = AppColors.Accent,
                                 fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
+                            DebugLine("Роль", ScheduleStore.role(ctx))
                             DebugLine("Всего пар в базе", "$totalPairs")
                             DebugLine("Групп", "${groups.size}")
                             DebugLine("Текущая неделя",
                                 if (ScheduleStore.currentWeek(ctx) == WeekType.EVEN) "Чётная" else "Нечётная")
-                            DebugLine("Координаты погоды", "56.60, 84.85 (Северск)")
                             DebugLine("Напоминание за", "$beforeMin мин")
                             DebugLine("DND авто-режим", if (dndEnabled) "включен" else "выключен")
                             DebugLine("Автообновление", if (autoUpdate) "включено" else "выключено")
                             DebugLine("Последнее обновление", formatLastUpdate(lastUpdate))
-                            DebugLine("Утренняя сводка", "%02d:%02d".format(morningH, morningM))
                             Spacer(Modifier.height(12.dp))
                             Button(
                                 onClick = {
@@ -1288,10 +1163,10 @@ fun PairCard(
     isFavorite: Boolean,
     isSkipped: Boolean,
     note: String,
+    showGroup: Boolean,
     onToggleFavorite: () -> Unit,
     onToggleSkipped: () -> Unit,
-    onNoteChanged: (String) -> Unit,
-    onTeacherClick: (String) -> Unit
+    onNoteChanged: (String) -> Unit
 ) {
     var noteText by remember(p) { mutableStateOf(note) }
     var editing by remember(p) { mutableStateOf(false) }
@@ -1318,8 +1193,10 @@ fun PairCard(
                     )
                 }
                 Spacer(Modifier.width(10.dp))
-                Text(p.time, color = AppColors.TextPrimary, fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(
+                    p.time, color = AppColors.Accent, fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+                )
                 IconButton(onClick = onToggleSkipped) {
                     Icon(
                         if (isSkipped) Icons.Default.PlayArrow else Icons.Default.Close, null,
@@ -1349,25 +1226,31 @@ fun PairCard(
                         textDecoration = if (isSkipped) TextDecoration.LineThrough else TextDecoration.None
                     )
                     Spacer(Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable(enabled = sg.teacher.isNotBlank()) {
-                            onTeacherClick(sg.teacher)
-                        }
-                    ) {
-                        Text("👤 ", fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🏛 ", fontSize = 12.sp)
                         Text(
-                            sg.teacher.ifEmpty { "—" },
+                            "Ауд. ${sg.room.ifEmpty { "—" }}",
                             color = AppColors.Accent, fontSize = 13.sp,
-                            textDecoration = if (sg.teacher.isNotBlank())
-                                TextDecoration.Underline else TextDecoration.None
+                            fontWeight = FontWeight.Medium
                         )
                     }
-                    Row {
-                        Text("🏛 ", fontSize = 12.sp)
-                        Text(sg.room.ifEmpty { "—" },
-                            color = AppColors.TextSecondary, fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium)
+                    if (showGroup) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("👥 ", fontSize = 12.sp)
+                            Text(
+                                "Группа ${p.group}",
+                                color = AppColors.TextPrimary, fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("👤 ", fontSize = 12.sp)
+                            Text(
+                                sg.teacher.ifEmpty { "—" },
+                                color = AppColors.TextSecondary, fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }

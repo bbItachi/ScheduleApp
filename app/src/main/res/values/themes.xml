@@ -1,7 +1,7 @@
 <resources>
     <style name="Theme.ScheduleApp" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#1E1E2E</item>
-        <item name="android:navigationBarColor">#1E1E2E</item>
-        <item name="android:windowBackground">#1E1E2E</item>
+        <item name="android:statusBarColor">#0A0E14</item>
+        <item name="android:navigationBarColor">#0A0E14</item>
+        <item name="android:windowBackground">#0A0E14</item>
     </style>
 </resources>

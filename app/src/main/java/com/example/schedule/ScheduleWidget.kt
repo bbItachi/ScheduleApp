@@ -21,7 +21,6 @@ class ScheduleWidget : AppWidgetProvider() {
                 val views = buildViews(context)
                 appWidgetManager.updateAppWidget(id, views)
             } catch (_: Exception) {
-                // Не валим приложение, показываем базовый layout
                 val fallback = RemoteViews(context.packageName, R.layout.widget_layout)
                 fallback.setTextViewText(R.id.widget_header, "Расписание СПК")
                 fallback.setTextViewText(R.id.widget_countdown, "Ошибка виджета")
@@ -38,7 +37,6 @@ class ScheduleWidget : AppWidgetProvider() {
     }
 
     companion object {
-
         fun updateAll(ctx: Context) {
             try {
                 val mgr = AppWidgetManager.getInstance(ctx)
@@ -56,7 +54,6 @@ class ScheduleWidget : AppWidgetProvider() {
         private fun buildViews(ctx: Context): RemoteViews {
             val views = RemoteViews(ctx.packageName, R.layout.widget_layout)
 
-            // PendingIntent для открытия приложения
             try {
                 val openIntent = Intent(ctx, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -68,9 +65,10 @@ class ScheduleWidget : AppWidgetProvider() {
                 views.setOnClickPendingIntent(R.id.widget_root, pi)
             } catch (_: Exception) { }
 
-            val group = ScheduleStore.group(ctx)
+            val isTeacher = ScheduleStore.isTeacher(ctx)
+            val target = if (isTeacher) ScheduleStore.teacherName(ctx) else ScheduleStore.group(ctx)
 
-            if (group.isEmpty()) {
+            if (target.isEmpty()) {
                 views.setTextViewText(R.id.widget_header, "Расписание СПК")
                 views.setTextViewText(R.id.widget_countdown, "Открой приложение")
                 views.setTextViewText(R.id.widget_time, "")
@@ -83,7 +81,11 @@ class ScheduleWidget : AppWidgetProvider() {
             val cal = Calendar.getInstance()
             val dayName = ScheduleStore.dayNameRuFor(cal)
             val week = ScheduleStore.weekFor(ctx, cal)
-            val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
+            val pairs = if (isTeacher) {
+                ScheduleStore.pairsForTeacher(ctx, dayName, week, target)
+            } else {
+                ScheduleStore.pairsForDay(ctx, dayName, week, target)
+            }
 
             val weekLabel = if (week == WeekType.EVEN) "чётная" else "нечётная"
             views.setTextViewText(R.id.widget_header, "Сегодня · ${shortDay(dayName)} · $weekLabel")
@@ -93,12 +95,11 @@ class ScheduleWidget : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_time, "")
                 views.setTextViewText(R.id.widget_subject, "Отдыхай!")
                 views.setTextViewText(R.id.widget_room, "")
-                views.setTextViewText(R.id.widget_footer, "Группа $group")
+                views.setTextViewText(R.id.widget_footer, if (isTeacher) target else "Группа $target")
                 return views
             }
 
             val nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-
             var current: Lesson? = null
             var next: Lesson? = null
             var upcomingCount = 0
@@ -106,21 +107,17 @@ class ScheduleWidget : AppWidgetProvider() {
             for (p in pairs) {
                 val s = ScheduleStore.timeToMinutes(p.time.substringBefore("-")) ?: continue
                 val e = ScheduleStore.timeToMinutes(p.time.substringAfter("-")) ?: (s + 90)
-
-                if (nowMin in s until e) {
-                    current = p
-                } else if (s > nowMin && next == null) {
-                    next = p
-                }
+                if (nowMin in s until e) current = p
+                else if (s > nowMin && next == null) next = p
                 if (s > nowMin) upcomingCount++
             }
 
-            val target = current ?: next
+            val t = current ?: next
 
-            if (target != null) {
-                val subj = target.subgroups.joinToString(" / ") { it.subject }
-                val rooms = target.subgroups.joinToString(" / ") { it.room }
-                val teachers = target.subgroups.joinToString(" / ") { it.teacher }
+            if (t != null) {
+                val subj = t.subgroups.joinToString(" / ") { it.subject }
+                val rooms = t.subgroups.joinToString(" / ") { it.room }
+                val teachers = t.subgroups.joinToString(" / ") { it.teacher }
 
                 val countdownText: String = if (current != null) {
                     val e = ScheduleStore.timeToMinutes(current.time.substringAfter("-")) ?: 0
@@ -145,9 +142,13 @@ class ScheduleWidget : AppWidgetProvider() {
                 }
 
                 views.setTextViewText(R.id.widget_countdown, countdownText)
-                views.setTextViewText(R.id.widget_time, target.time)
+                views.setTextViewText(R.id.widget_time, t.time)
                 views.setTextViewText(R.id.widget_subject, subj.take(60))
-                views.setTextViewText(R.id.widget_room, "Ауд. $rooms · $teachers".take(50))
+                if (isTeacher) {
+                    views.setTextViewText(R.id.widget_room, "Гр. ${t.group} · ауд. $rooms".take(50))
+                } else {
+                    views.setTextViewText(R.id.widget_room, "Ауд. $rooms · $teachers".take(50))
+                }
 
                 val footer = if (upcomingCount > 0) {
                     "Осталось сегодня: $upcomingCount из ${pairs.size}"

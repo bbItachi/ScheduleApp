@@ -29,35 +29,27 @@ val ScheduleDarkScheme = darkColorScheme(
     onPrimary = Color.White,
     primaryContainer = Color(0xFF1E4FA8),
     onPrimaryContainer = Color.White,
-
     secondary = Color(0xFF2563EB),
     onSecondary = Color.White,
     secondaryContainer = Color(0xFF1A2F55),
     onSecondaryContainer = Color.White,
-
     tertiary = Color(0xFF60A5FA),
     onTertiary = Color.Black,
     tertiaryContainer = Color(0xFF1E4FA8),
     onTertiaryContainer = Color.White,
-
     background = Color(0xFF0A0E14),
     onBackground = Color.White,
-
     surface = Color(0xFF131A22),
     onSurface = Color.White,
-
     surfaceVariant = Color(0xFF1B2330),
     onSurfaceVariant = Color(0xFFA8C0E0),
     surfaceTint = Color(0xFF3B82F6),
-
     inverseSurface = Color(0xFFEEEEEE),
     inverseOnSurface = Color(0xFF0A0E14),
-
     error = Color(0xFF93C5FD),
     onError = Color.Black,
     errorContainer = Color(0xFF1E4FA8),
     onErrorContainer = Color.White,
-
     outline = Color(0xFF2A3545),
     outlineVariant = Color(0xFF222B38),
     scrim = Color.Black

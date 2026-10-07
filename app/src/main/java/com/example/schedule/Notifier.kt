@@ -23,7 +23,7 @@ object Notifier {
         val morning = NotificationChannel(
             CH_MORNING, "Утренняя сводка", NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "Пары и погода на сегодня"
+            description = "Пары на сегодня"
             enableLights(true)
             lightColor = 0xFF3B82F6.toInt()
             setShowBadge(true)
@@ -102,8 +102,9 @@ object Notifier {
 
     fun scheduleBeforePairs(ctx: Context) {
         val am = ctx.getSystemService(AlarmManager::class.java)
-        val group = ScheduleStore.group(ctx)
-        if (group.isEmpty()) return
+        val isTeacher = ScheduleStore.isTeacher(ctx)
+        val target = if (isTeacher) ScheduleStore.teacherName(ctx) else ScheduleStore.group(ctx)
+        if (target.isEmpty()) return
         val before = ScheduleStore.beforeMinutes(ctx)
 
         for (i in 0..200) {
@@ -123,7 +124,11 @@ object Notifier {
             dayCal.add(Calendar.DAY_OF_YEAR, dayOffset)
             val dayName = ScheduleStore.dayNameRuFor(dayCal)
             val week = ScheduleStore.weekFor(ctx, dayCal)
-            val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
+            val pairs = if (isTeacher) {
+                ScheduleStore.pairsForTeacher(ctx, dayName, week, target)
+            } else {
+                ScheduleStore.pairsForDay(ctx, dayName, week, target)
+            }
 
             pairs.forEach { pair ->
                 val (ph, pm) = parseStartMinutes(pair.time) ?: return@forEach
@@ -135,11 +140,13 @@ object Notifier {
                 pairCal.add(Calendar.MINUTE, -before)
                 if (pairCal.timeInMillis <= System.currentTimeMillis()) return@forEach
 
+                val groupsText = pair.group
                 val intent = Intent(ctx, AlarmReceiver::class.java).apply {
                     action = "before"
                     putExtra("subject", pair.subgroups.joinToString(" / ") { it.subject })
                     putExtra("room", pair.subgroups.joinToString(" / ") { it.room })
                     putExtra("teacher", pair.subgroups.joinToString(" / ") { it.teacher })
+                    putExtra("group", groupsText)
                     putExtra("time", pair.time)
                     putExtra("num", pair.number)
                     putExtra("before", before)
@@ -177,8 +184,9 @@ object Notifier {
         }
 
         if (!ScheduleStore.dndEnabled(ctx)) return
-        val group = ScheduleStore.group(ctx)
-        if (group.isEmpty()) return
+        val isTeacher = ScheduleStore.isTeacher(ctx)
+        val target = if (isTeacher) ScheduleStore.teacherName(ctx) else ScheduleStore.group(ctx)
+        if (target.isEmpty()) return
 
         val today = Calendar.getInstance()
         var onCode = 5000
@@ -189,7 +197,11 @@ object Notifier {
             dayCal.add(Calendar.DAY_OF_YEAR, dayOffset)
             val dayName = ScheduleStore.dayNameRuFor(dayCal)
             val week = ScheduleStore.weekFor(ctx, dayCal)
-            val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
+            val pairs = if (isTeacher) {
+                ScheduleStore.pairsForTeacher(ctx, dayName, week, target)
+            } else {
+                ScheduleStore.pairsForDay(ctx, dayName, week, target)
+            }
 
             for (pair in pairs) {
                 val start = parseStartMinutes(pair.time) ?: continue
@@ -236,11 +248,16 @@ object Notifier {
             val nm = ctx.getSystemService(NotificationManager::class.java)
             when (intent.action) {
                 "morning" -> {
-                    val group = ScheduleStore.group(ctx)
+                    val isTeacher = ScheduleStore.isTeacher(ctx)
+                    val target = if (isTeacher) ScheduleStore.teacherName(ctx) else ScheduleStore.group(ctx)
                     val today = Calendar.getInstance()
                     val dayName = ScheduleStore.dayNameRuFor(today)
                     val week = ScheduleStore.weekFor(ctx, today)
-                    val pairs = ScheduleStore.pairsForDay(ctx, dayName, week, group)
+                    val pairs = if (isTeacher) {
+                        ScheduleStore.pairsForTeacher(ctx, dayName, week, target)
+                    } else {
+                        ScheduleStore.pairsForDay(ctx, dayName, week, target)
+                    }
 
                     val largeIcon = getLargeIcon(ctx)
                     val contentPi = openAppPendingIntent(ctx)
@@ -261,8 +278,9 @@ object Notifier {
                         val style = NotificationCompat.InboxStyle()
                         for (p in pairs.take(10)) {
                             val subj = p.subgroups.joinToString("/") { it.subject }
-                                .let { if (it.length > 45) it.take(42) + "…" else it }
-                            style.addLine("${p.number}. ${p.time}  ·  $subj")
+                                .let { if (it.length > 40) it.take(37) + "…" else it }
+                            val grpTag = if (isTeacher) " · ${p.group}" else ""
+                            style.addLine("${p.number}. ${p.time}  ·  $subj$grpTag")
                         }
                         if (pairs.size > 10) {
                             style.setSummaryText("Всего ${pairs.size} пар")
@@ -291,17 +309,23 @@ object Notifier {
                     val subject = intent.getStringExtra("subject") ?: ""
                     val room = intent.getStringExtra("room") ?: ""
                     val teacher = intent.getStringExtra("teacher") ?: ""
+                    val group = intent.getStringExtra("group") ?: ""
                     val time = intent.getStringExtra("time") ?: ""
                     val num = intent.getIntExtra("num", 0)
                     val before = intent.getIntExtra("before", 15)
 
                     val largeIcon = getLargeIcon(ctx)
                     val contentPi = openAppPendingIntent(ctx)
+                    val isTeacher = ScheduleStore.isTeacher(ctx)
 
                     val bigText = buildString {
                         append(subject).append("\n\n")
                         append("🏛  Аудитория: ").append(room).append("\n")
-                        append("👤  Преподаватель: ").append(teacher).append("\n")
+                        if (isTeacher) {
+                            append("👥  Группа: ").append(group).append("\n")
+                        } else {
+                            append("👤  Преподаватель: ").append(teacher).append("\n")
+                        }
                         append("🕐  Время: ").append(time).append("\n")
                     }
 
@@ -310,7 +334,10 @@ object Notifier {
                         .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
                         .setColor(0xFF3B82F6.toInt())
                         .setContentTitle("Через $before мин · пара $num")
-                        .setContentText("$subject · ауд. $room")
+                        .setContentText(
+                            if (isTeacher) "$subject · гр. $group · ауд. $room"
+                            else "$subject · ауд. $room"
+                        )
                         .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
                         .setContentIntent(contentPi)
                         .setAutoCancel(true)
