@@ -17,8 +17,16 @@ class ScheduleWidget : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         for (id in appWidgetIds) {
-            val views = buildViews(context)
-            appWidgetManager.updateAppWidget(id, views)
+            try {
+                val views = buildViews(context)
+                appWidgetManager.updateAppWidget(id, views)
+            } catch (_: Exception) {
+                // Не валим приложение, показываем базовый layout
+                val fallback = RemoteViews(context.packageName, R.layout.widget_layout)
+                fallback.setTextViewText(R.id.widget_header, "Расписание СПК")
+                fallback.setTextViewText(R.id.widget_countdown, "Ошибка виджета")
+                appWidgetManager.updateAppWidget(id, fallback)
+            }
         }
     }
 
@@ -39,20 +47,26 @@ class ScheduleWidget : AppWidgetProvider() {
                 )
                 if (ids.isEmpty()) return
                 val views = buildViews(ctx)
-                for (id in ids) mgr.updateAppWidget(id, views)
+                for (id in ids) {
+                    try { mgr.updateAppWidget(id, views) } catch (_: Exception) { }
+                }
             } catch (_: Exception) { }
         }
 
         private fun buildViews(ctx: Context): RemoteViews {
             val views = RemoteViews(ctx.packageName, R.layout.widget_layout)
 
-            // Открыть приложение при тапе
-            val openIntent = Intent(ctx, MainActivity::class.java)
-            val pi = PendingIntent.getActivity(
-                ctx, 0, openIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            views.setOnClickPendingIntent(R.id.widget_root, pi)
+            // PendingIntent для открытия приложения
+            try {
+                val openIntent = Intent(ctx, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                val pi = PendingIntent.getActivity(
+                    ctx, 0, openIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.widget_root, pi)
+            } catch (_: Exception) { }
 
             val group = ScheduleStore.group(ctx)
 
@@ -108,12 +122,10 @@ class ScheduleWidget : AppWidgetProvider() {
                 val rooms = target.subgroups.joinToString(" / ") { it.room }
                 val teachers = target.subgroups.joinToString(" / ") { it.teacher }
 
-                // ─── Строка отсчёта ───
-                val countdownText: String
-                if (current != null) {
+                val countdownText: String = if (current != null) {
                     val e = ScheduleStore.timeToMinutes(current.time.substringAfter("-")) ?: 0
                     val left = (e - nowMin).coerceAtLeast(0)
-                    countdownText = if (left > 60) {
+                    if (left > 60) {
                         val h = left / 60
                         val m = left % 60
                         "Идёт · до конца ${h} ч ${m} мин"
@@ -123,7 +135,7 @@ class ScheduleWidget : AppWidgetProvider() {
                 } else {
                     val s = ScheduleStore.timeToMinutes(next!!.time.substringBefore("-")) ?: nowMin
                     val diff = (s - nowMin).coerceAtLeast(0)
-                    countdownText = if (diff > 60) {
+                    if (diff > 60) {
                         val h = diff / 60
                         val m = diff % 60
                         "Через ${h} ч ${m} мин"
@@ -131,14 +143,14 @@ class ScheduleWidget : AppWidgetProvider() {
                         "Через $diff мин"
                     }
                 }
-                views.setTextViewText(R.id.widget_countdown, countdownText)
 
+                views.setTextViewText(R.id.widget_countdown, countdownText)
                 views.setTextViewText(R.id.widget_time, target.time)
                 views.setTextViewText(R.id.widget_subject, subj.take(60))
                 views.setTextViewText(R.id.widget_room, "Ауд. $rooms · $teachers".take(50))
 
                 val footer = if (upcomingCount > 0) {
-                    "Осталось сегодня: $upcomingCount · всего ${pairs.size}"
+                    "Осталось сегодня: $upcomingCount из ${pairs.size}"
                 } else {
                     "Всего сегодня ${pairs.size} пар"
                 }
