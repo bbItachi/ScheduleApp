@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.schedule"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.9"
+        versionCode = 5
+        versionName = "1.8"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
