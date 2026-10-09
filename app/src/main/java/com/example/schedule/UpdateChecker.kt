@@ -23,13 +23,11 @@ object UpdateChecker {
         "https://api.github.com/repos/bbItachi/ScheduleApp/releases/latest"
 
     data class UpdateInfo(
-        val version: String,        // например "1.8"
-        val tagName: String,        // например "v1.8"
-        val downloadUrl: String,    // ссылка на .apk в assets релиза
-        val notes: String           // описание релиза
+        val version: String,
+        val tagName: String,
+        val downloadUrl: String,
+        val notes: String
     )
-
-    // ─── Проверка обновления ───
 
     suspend fun check(): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
@@ -52,7 +50,6 @@ object UpdateChecker {
             val version = tagName.trimStart('v', 'V')
             val notes = root["body"]?.jsonPrimitive?.content ?: ""
 
-            // Ищем APK среди assets
             val assets = root["assets"]?.jsonArray ?: return@withContext null
             var apkUrl: String? = null
             for (a in assets) {
@@ -64,7 +61,6 @@ object UpdateChecker {
             }
             val urlApk = apkUrl ?: return@withContext null
 
-            // Сравниваем с текущей версией
             val current = BuildConfig.VERSION_NAME
             if (!isNewer(version, current)) return@withContext null
 
@@ -74,7 +70,6 @@ object UpdateChecker {
         }
     }
 
-    // Сравнение "1.8" > "1.7"
     private fun isNewer(newVer: String, oldVer: String): Boolean {
         try {
             val n = newVer.split(".").map { it.toIntOrNull() ?: 0 }
@@ -92,8 +87,6 @@ object UpdateChecker {
         }
     }
 
-    // ─── Скачивание APK ───
-
     suspend fun downloadApk(
         ctx: Context,
         url: String,
@@ -101,7 +94,6 @@ object UpdateChecker {
     ): File? = withContext(Dispatchers.IO) {
         try {
             val dir = File(ctx.cacheDir, "updates").apply { mkdirs() }
-            // Удалим старые файлы
             dir.listFiles()?.forEach { it.delete() }
             val outFile = File(dir, "schedule-update.apk")
 
@@ -139,14 +131,10 @@ object UpdateChecker {
         }
     }
 
-    // ─── Запуск установщика ───
-
     fun installApk(ctx: Context, apkFile: File): Boolean {
         return try {
-            // Проверяем разрешение «Установка из неизвестных источников»
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (!ctx.packageManager.canRequestPackageInstalls()) {
-                    // Отправляем в настройки
                     val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
                         data = Uri.parse("package:${ctx.packageName}")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
