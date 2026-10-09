@@ -15,20 +15,30 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,8 +50,7 @@ class MainActivity : ComponentActivity() {
         ScheduleUpdater.schedule(this, enabled)
         ScheduleWidget.updateAll(this)
 
-        // Автообновление при старте: если расписание отсутствует или старше 1 дня
-        maybeAutoUpdate()
+        maybeAutoUpdateSchedule()
 
         setContent {
             MaterialTheme(colorScheme = ScheduleDarkScheme) {
@@ -50,7 +59,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun maybeAutoUpdate() {
+    private fun maybeAutoUpdateSchedule() {
         val last = ScheduleStore.lastAutoUpdate(this)
         val hasData = ScheduleStore.load(this)?.pairs?.isNotEmpty() == true
         val ageMs = System.currentTimeMillis() - last
@@ -64,8 +73,132 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun RootApp() {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     var showOnboarding by remember {
         mutableStateOf(ScheduleStore.role(ctx).isEmpty())
+    }
+
+    // ─── Состояние диалога обновления ───
+    var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadPercent by remember { mutableStateOf(0) }
+    var downloadError by remember { mutableStateOf<String?>(null) }
+
+    // Проверка обновления при старте
+    LaunchedEffect(Unit) {
+        val update = UpdateChecker.check()
+        if (update != null) {
+            updateInfo = update
+        }
+    }
+
+    // ─── Диалог обновления ───
+    updateInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!isDownloading) updateInfo = null
+            },
+            title = {
+                Text(
+                    "🆕 Доступно обновление v${info.version}",
+                    color = AppColors.TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        "Текущая версия: ${BuildConfig.VERSION_NAME}",
+                        color = AppColors.TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+
+                    if (info.notes.isNotBlank()) {
+                        Text(
+                            "Что нового:",
+                            color = AppColors.TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Box(Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+                            Text(
+                                info.notes,
+                                color = AppColors.TextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+
+                    if (isDownloading) {
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "Скачиваем… $downloadPercent%",
+                            color = AppColors.Accent,
+                            fontSize = 13.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { downloadPercent / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = AppColors.Accent,
+                            trackColor = AppColors.CardElevated
+                        )
+                    }
+
+                    downloadError?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text(it, color = AppColors.Accent, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (isDownloading) return@Button
+                        scope.launch {
+                            isDownloading = true
+                            downloadError = null
+                            downloadPercent = 0
+                            val apk = UpdateChecker.downloadApk(ctx, info.downloadUrl) { p ->
+                                downloadPercent = p
+                            }
+                            isDownloading = false
+                            if (apk != null) {
+                                val ok = UpdateChecker.installApk(ctx, apk)
+                                if (!ok) {
+                                    downloadError = "Разреши установку из этого источника и нажми ещё раз"
+                                } else {
+                                    updateInfo = null
+                                }
+                            } else {
+                                downloadError = "Не удалось скачать. Проверь интернет."
+                            }
+                        }
+                    },
+                    enabled = !isDownloading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(if (isDownloading) "Скачиваем…" else "Обновить")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { if (!isDownloading) updateInfo = null },
+                    enabled = !isDownloading
+                ) {
+                    Text("Позже", color = AppColors.TextSecondary)
+                }
+            },
+            containerColor = AppColors.Card
+        )
     }
 
     if (showOnboarding) {
