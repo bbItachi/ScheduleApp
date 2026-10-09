@@ -13,7 +13,7 @@ object XlsxParser {
     )
 
     private val KNOWN_ROOMS = setOf(
-        "ЦРК", "М", "ОНЛАЙН", "СЗ", "СЗ/1", "СЗ/2", "М/1", "М/2"
+        "ЦРК", "М", "СЗ", "СЗ/1", "СЗ/2", "М/1", "М/2"
     )
 
     fun parse(input: InputStream): List<Lesson> {
@@ -135,12 +135,14 @@ object XlsxParser {
         return result
     }
 
-    // Если в преподе/аудитории есть слово «онлайн» — заменяем аудиторию на «Онлайн»
+    // Если в преподе/аудитории есть «онлайн» — заменяем аудиторию на «Онлайн»
     private fun cleanOnline(teacher: String, room: String): Pair<String, String> {
         val t = teacher.trim()
         val r = room.trim()
         val hasOnline = t.contains("онлайн", ignoreCase = true) ||
-                r.contains("онлайн", ignoreCase = true)
+                r.contains("онлайн", ignoreCase = true) ||
+                t.equals("онлайн", true) ||
+                r.equals("онлайн", true)
         if (!hasOnline) return t to r
         val cleanT = t.replace(Regex("(?i)\\s*онлайн\\s*"), " ").trim()
             .trim(',', '.', ';', '-', '_').trim()
