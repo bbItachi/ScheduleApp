@@ -15,7 +15,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +26,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,13 +34,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Применяем тему ДО setContent
+        if (ScheduleStore.isLightTheme(this)) {
+            AppColors.applyLight()
+        } else {
+            AppColors.applyDark()
+        }
+
         Notifier.ensureChannels(this)
         RescheduleWorker.schedule(this)
 
@@ -53,7 +57,12 @@ class MainActivity : ComponentActivity() {
         maybeAutoUpdateSchedule()
 
         setContent {
-            MaterialTheme(colorScheme = ScheduleDarkScheme) {
+            val scheme = if (ScheduleStore.isLightTheme(this)) {
+                ScheduleLightScheme
+            } else {
+                ScheduleDarkScheme
+            }
+            MaterialTheme(colorScheme = scheme) {
                 RootApp()
             }
         }
@@ -85,7 +94,6 @@ fun RootApp() {
     var downloadPercent by remember { mutableStateOf(0) }
     var downloadError by remember { mutableStateOf<String?>(null) }
 
-    // Проверка обновления при старте
     LaunchedEffect(Unit) {
         val update = UpdateChecker.check()
         if (update != null) {
@@ -93,12 +101,9 @@ fun RootApp() {
         }
     }
 
-    // ─── Диалог обновления ───
     updateInfo?.let { info ->
         AlertDialog(
-            onDismissRequest = {
-                if (!isDownloading) updateInfo = null
-            },
+            onDismissRequest = { if (!isDownloading) updateInfo = null },
             title = {
                 Text(
                     "🆕 Доступно обновление v${info.version}",
@@ -170,7 +175,7 @@ fun RootApp() {
                             if (apk != null) {
                                 val ok = UpdateChecker.installApk(ctx, apk)
                                 if (!ok) {
-                                    downloadError = "Разреши установку из этого источника и нажми ещё раз"
+                                    downloadError = "Разреши установку из этого источника и нажми «Обновить» ещё раз"
                                 } else {
                                     updateInfo = null
                                 }
