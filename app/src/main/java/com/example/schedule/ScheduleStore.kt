@@ -37,6 +37,8 @@ object ScheduleStore {
         return p
     }
 
+    // ─── Расписание ───
+
     fun save(ctx: Context, pairs: List<Lesson>) {
         val data = SavedSchedule(pairs, System.currentTimeMillis())
         ctx.openFileOutput(FILE, Context.MODE_PRIVATE)
