@@ -20,6 +20,10 @@ object ScheduleStore {
     const val ROLE_STUDENT = "STUDENT"
     const val ROLE_TEACHER = "TEACHER"
 
+    const val THEME_AUTO = "AUTO"
+    const val THEME_DARK = "DARK"
+    const val THEME_LIGHT = "LIGHT"
+
     private var scheduleCache: SavedSchedule? = null
     private var scheduleLoaded = false
     private var notesCache: List<Note>? = null
@@ -117,6 +121,34 @@ object ScheduleStore {
     fun lastAutoUpdate(ctx: Context): Long = prefs(ctx).getLong("last_auto_update", 0)
     fun setLastAutoUpdate(ctx: Context, t: Long) {
         prefs(ctx).edit().putLong("last_auto_update", t).apply()
+    }
+
+    // ─── Тема ───
+
+    fun themeMode(ctx: Context): String =
+        prefs(ctx).getString("theme_mode", THEME_AUTO) ?: THEME_AUTO
+
+    fun setThemeMode(ctx: Context, mode: String) {
+        prefs(ctx).edit().putString("theme_mode", mode).apply()
+    }
+
+    fun isLightTheme(ctx: Context): Boolean = when (themeMode(ctx)) {
+        THEME_LIGHT -> true
+        THEME_DARK -> false
+        else -> {
+            // Авто: 8:00 – 20:00 — светлая, иначе тёмная
+            val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            h in 8 until 20
+        }
+    }
+
+    // ─── Уведомление о конце пары ───
+
+    fun notifyEndOfPair(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("notify_end", false)
+
+    fun setNotifyEndOfPair(ctx: Context, v: Boolean) {
+        prefs(ctx).edit().putBoolean("notify_end", v).apply()
     }
 
     // ─── Избранное / пропуск ───
