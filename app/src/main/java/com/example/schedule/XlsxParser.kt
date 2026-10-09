@@ -107,25 +107,23 @@ object XlsxParser {
                         val ri = roomPos[k]
                         val teacher = teachCells.getOrElse(si) { "" }
                             .ifEmpty { teachCells.firstOrNull { it.isNotEmpty() } ?: "" }
-                        subs += SubgroupPair(k + 1, rowCells[si], teacher, rowCells[ri])
+                        val (t, r) = cleanOnline(teacher, rowCells[ri])
+                        subs += SubgroupPair(k + 1, rowCells[si], t, r)
                     }
                 } else if (subjectPos.size == 1) {
                     val si = subjectPos[0]
                     val ri = roomPos.firstOrNull()
                     val teacher = teachCells.getOrElse(si) { "" }
                         .ifEmpty { teachCells.firstOrNull { it.isNotEmpty() } ?: "" }
-                    subs += SubgroupPair(
-                        1,
-                        rowCells[si],
-                        teacher,
-                        if (ri != null) rowCells[ri] else ""
-                    )
+                    val (t, r) = cleanOnline(teacher, if (ri != null) rowCells[ri] else "")
+                    subs += SubgroupPair(1, rowCells[si], t, r)
                 } else if (subjectPos.size >= 2) {
-                    val room = roomPos.firstOrNull()?.let { rowCells[it] } ?: ""
+                    val rawRoom = roomPos.firstOrNull()?.let { rowCells[it] } ?: ""
                     for (k in 0..1) {
                         val si = subjectPos[k]
                         val teacher = teachCells.getOrElse(si) { "" }
-                        subs += SubgroupPair(k + 1, rowCells[si], teacher, room)
+                        val (t, r) = cleanOnline(teacher, rawRoom)
+                        subs += SubgroupPair(k + 1, rowCells[si], t, r)
                     }
                 }
 
@@ -137,6 +135,18 @@ object XlsxParser {
         return result
     }
 
+    // Если в преподе/аудитории есть слово «онлайн» — заменяем аудиторию на «Онлайн»
+    private fun cleanOnline(teacher: String, room: String): Pair<String, String> {
+        val t = teacher.trim()
+        val r = room.trim()
+        val hasOnline = t.contains("онлайн", ignoreCase = true) ||
+                r.contains("онлайн", ignoreCase = true)
+        if (!hasOnline) return t to r
+        val cleanT = t.replace(Regex("(?i)\\s*онлайн\\s*"), " ").trim()
+            .trim(',', '.', ';', '-', '_').trim()
+        return cleanT to "Онлайн"
+    }
+
     private fun looksLikeRoom(v: String): Boolean {
         if (v.isEmpty()) return false
         val t = v.trim()
@@ -144,6 +154,7 @@ object XlsxParser {
         if (upper in KNOWN_ROOMS) return true
         if (upper.startsWith("СЗ/") || upper.startsWith("М/")) return true
         if (upper.startsWith("ЦРК")) return true
+        if (upper.contains("онлайн", ignoreCase = true)) return true
         val digits = t.count { it.isDigit() }
         val letters = t.count { it.isLetter() }
         return digits >= 1 && letters <= 2 && t.length <= 10 && !t.contains(' ')
