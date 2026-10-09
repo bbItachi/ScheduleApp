@@ -5,7 +5,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
 object AppColors {
-    // Текущие цвета (по умолчанию — тёмная)
+    // Текущие активные цвета (меняются при applyDark/applyLight)
     var Background = Color(0xFF0A0E14)
     var Surface = Color(0xFF131A22)
     var Card = Color(0xFF1B2330)
