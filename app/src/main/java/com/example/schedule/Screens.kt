@@ -32,8 +32,14 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
+
+private const val CHANNEL_URL = "https://max.ru/channel_rasp_spk"
+private const val SCHEDULE_URL = "http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx"
+private const val APK_URL = "https://github.com/bbItachi/ScheduleApp/releases/latest"
 
 // ═══════════════════════════════════════════════════════════
 //  ОБЩИЕ КОМПОНЕНТЫ
@@ -64,39 +70,20 @@ fun CircleIconButton(
     }
 }
 
-private fun parseStartMinutes(time: String): Int? {
-    val start = time.substringBefore("-").trim().replace(':', '.')
-    val parts = start.split(".")
-    if (parts.size < 2) return null
-    val h = parts[0].toIntOrNull() ?: return null
-    val m = parts[1].toIntOrNull() ?: return null
-    return h * 60 + m
-}
-
-private fun parseEndMinutes(time: String): Int? {
-    val end = time.substringAfter("-").trim().replace(':', '.')
-    val parts = end.split(".")
-    if (parts.size < 2) return null
-    val h = parts[0].toIntOrNull() ?: return null
-    val m = parts[1].toIntOrNull() ?: return null
-    return h * 60 + m
-}
-
 private fun pairStatusText(pairs: List<Lesson>): String? {
     if (pairs.isEmpty()) return null
     val now = Calendar.getInstance()
     val nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
 
     for (p in pairs) {
-        val s = parseStartMinutes(p.time) ?: continue
-        val e = parseEndMinutes(p.time) ?: continue
+        val s = ScheduleStore.timeToMinutes(p.time.substringBefore("-")) ?: continue
+        val e = ScheduleStore.timeToMinutes(p.time.substringAfter("-")) ?: (s + 90)
         if (nowMin in s until e) {
-            val left = e - nowMin
-            return "идёт ${p.number}-я пара · до конца $left мин"
+            return "идёт ${p.number}-я пара · до конца ${e - nowMin} мин"
         }
     }
     for (p in pairs) {
-        val s = parseStartMinutes(p.time) ?: continue
+        val s = ScheduleStore.timeToMinutes(p.time.substringBefore("-")) ?: continue
         if (s > nowMin) {
             val diff = s - nowMin
             val h = diff / 60
@@ -113,8 +100,7 @@ private fun buildNotesMap(ctx: android.content.Context): Map<String, String> =
 
 private fun formatLastUpdate(ts: Long): String {
     if (ts <= 0L) return "никогда"
-    val now = System.currentTimeMillis()
-    val diff = now - ts
+    val diff = System.currentTimeMillis() - ts
     val min = diff / 60_000
     val hour = diff / 3_600_000
     val day = diff / 86_400_000
@@ -126,6 +112,10 @@ private fun formatLastUpdate(ts: Long): String {
         else -> SimpleDateFormat("d MMMM", Locale("ru")).format(Date(ts))
     }
 }
+
+private fun isOnline(room: String): Boolean =
+    room.equals("Онлайн", ignoreCase = true) ||
+            room.contains("онлайн", ignoreCase = true)
 
 // ═══════════════════════════════════════════════════════════
 //  ЧАСЫ
@@ -277,18 +267,20 @@ fun TodayScreen() {
         }
     }
 
-    val picker = rememberLauncherForActivityResult(
+    // Ручная загрузка xlsx из файла
+    val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             isLoading = true
-            status = "Парсим…"
+            status = "Загружаем файл…"
             try {
                 val parsed = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)!!.use { XlsxParser.parse(it) }
                 }
                 ScheduleStore.save(ctx, parsed)
+                ScheduleStore.setLastAutoUpdate(ctx, System.currentTimeMillis())
                 pairs = if (isTeacher) {
                     ScheduleStore.pairsForTeacher(ctx, ScheduleStore.dayNameRu(), week, teacherName)
                 } else {
@@ -297,12 +289,56 @@ fun TodayScreen() {
                 status = "Загружено пар: ${parsed.size}"
                 withContext(Dispatchers.IO) {
                     Notifier.scheduleBeforePairs(ctx)
-                    Notifier.scheduleEndOfPairs(ctx)
                     Notifier.scheduleDnd(ctx)
                     ScheduleWidget.updateAll(ctx)
                 }
             } catch (e: Exception) {
                 status = "Ошибка: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    // Кнопка «Обновить» — качает с сайта
+    fun downloadFromSite() {
+        if (isLoading) return
+        scope.launch {
+            isLoading = true
+            status = "Скачиваем расписание…"
+            try {
+                val parsed = withContext(Dispatchers.IO) {
+                    val url = URL(SCHEDULE_URL)
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 20_000
+                        readTimeout = 45_000
+                        setRequestProperty("User-Agent", "ScheduleApp/1.11")
+                        instanceFollowRedirects = true
+                    }
+                    val r = conn.inputStream.use { XlsxParser.parse(it) }
+                    conn.disconnect()
+                    r
+                }
+                if (parsed.isEmpty()) {
+                    status = "Файл пустой"
+                } else {
+                    ScheduleStore.save(ctx, parsed)
+                    ScheduleStore.setLastAutoUpdate(ctx, System.currentTimeMillis())
+                    pairs = if (isTeacher) {
+                        ScheduleStore.pairsForTeacher(ctx, ScheduleStore.dayNameRu(), week, teacherName)
+                    } else {
+                        ScheduleStore.pairsFor(ctx, ScheduleStore.dayNameRu(), week)
+                    }
+                    status = "Обновлено пар: ${parsed.size}"
+                    withContext(Dispatchers.IO) {
+                        Notifier.scheduleBeforePairs(ctx)
+                        Notifier.scheduleDnd(ctx)
+                        ScheduleWidget.updateAll(ctx)
+                    }
+                }
+            } catch (e: Exception) {
+                status = "Не удалось скачать: ${e.message ?: "ошибка сети"}"
             } finally {
                 isLoading = false
             }
@@ -325,17 +361,11 @@ fun TodayScreen() {
                 Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(Modifier.weight(1f)) {
-                    DateClockView()
-                }
+                Box(Modifier.weight(1f)) { DateClockView() }
                 Column(horizontalAlignment = Alignment.End) {
-                    Surface(
-                        color = AppColors.AccentSoft,
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
+                    Surface(color = AppColors.AccentSoft, shape = RoundedCornerShape(20.dp)) {
                         Text(
-                            weekLabel,
-                            color = AppColors.Accent, fontSize = 12.sp,
+                            weekLabel, color = AppColors.Accent, fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                         )
@@ -369,11 +399,8 @@ fun TodayScreen() {
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.CheckCircle, null,
-                            tint = AppColors.Accent,
-                            modifier = Modifier.size(48.dp)
-                        )
+                        Icon(Icons.Default.CheckCircle, null,
+                            tint = AppColors.Accent, modifier = Modifier.size(48.dp))
                         Spacer(Modifier.height(8.dp))
                         Text("Пар нет 🎉", color = AppColors.TextSecondary, fontSize = 16.sp)
                     }
@@ -411,10 +438,8 @@ fun TodayScreen() {
 
         Column {
             if (status.isNotEmpty()) {
-                Text(
-                    status, color = AppColors.Accent, fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
+                Text(status, color = AppColors.Accent, fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 6.dp))
             }
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -422,27 +447,20 @@ fun TodayScreen() {
             ) {
                 Spacer(Modifier.weight(1f))
 
+                // Обновить = скачать с сайта
                 CircleIconButton(
                     icon = Icons.Default.Refresh,
                     filled = false,
-                    onClick = {
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                Notifier.scheduleBeforePairs(ctx)
-                                Notifier.scheduleEndOfPairs(ctx)
-                                Notifier.scheduleDnd(ctx)
-                                ScheduleWidget.updateAll(ctx)
-                            }
-                            status = "Обновлено"
-                        }
-                    }
+                    onClick = { downloadFromSite() }
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(8.dp))
+
+                // Загрузить = выбрать файл вручную
                 CircleIconButton(
                     icon = Icons.Default.Upload,
                     filled = false,
                     onClick = {
-                        picker.launch(arrayOf(
+                        filePicker.launch(arrayOf(
                             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             "application/vnd.ms-excel", "*/*"
                         ))
@@ -511,16 +529,10 @@ fun WeekScreen() {
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Неделя",
-                color = AppColors.TextPrimary,
-                fontSize = 20.sp, fontWeight = FontWeight.Bold
-            )
+            Text("Неделя", color = AppColors.TextPrimary,
+                fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(10.dp))
-            Surface(
-                color = AppColors.AccentSoft,
-                shape = RoundedCornerShape(20.dp)
-            ) {
+            Surface(color = AppColors.AccentSoft, shape = RoundedCornerShape(20.dp)) {
                 Text(
                     if (week == WeekType.EVEN) "чётная" else "нечётная",
                     color = AppColors.Accent, fontSize = 12.sp,
@@ -545,10 +557,8 @@ fun WeekScreen() {
                     containerColor = AppColors.Card,
                     selectedContainerColor = AppColors.Accent
                 ),
-                border = BorderStroke(
-                    1.dp,
-                    if (showOnlyFavorites) AppColors.Accent else AppColors.Border
-                )
+                border = BorderStroke(1.dp,
+                    if (showOnlyFavorites) AppColors.Accent else AppColors.Border)
             )
         }
 
@@ -591,10 +601,7 @@ fun WeekScreen() {
                     )
                 }
                 if (day in expandedDays) {
-                    items(
-                        items = dayPairs,
-                        key = { "${it.group}|${it.day}|${it.week}|${it.number}" }
-                    ) { p ->
+                    items(dayPairs, key = { "${it.group}|${it.day}|${it.week}|${it.number}" }) { p ->
                         val key = "${p.group}|${p.day}|${p.week}|${p.number}"
                         PairCard(
                             p = p,
@@ -675,15 +682,15 @@ fun SettingsScreen() {
     var morningM by remember { mutableStateOf(ScheduleStore.morningMinute(ctx)) }
     var beforeMin by remember { mutableStateOf(ScheduleStore.beforeMinutes(ctx)) }
     var dndEnabled by remember { mutableStateOf(ScheduleStore.dndEnabled(ctx)) }
-    var notifyEnd by remember { mutableStateOf(ScheduleStore.notifyEndOfPair(ctx)) }
     var autoUpdate by remember { mutableStateOf(ScheduleStore.autoUpdate(ctx)) }
-    var lastUpdate by remember { mutableStateOf(ScheduleStore.lastAutoUpdate(ctx)) }
+    var notifyEnd by remember { mutableStateOf(ScheduleStore.notifyEndOfPair(ctx)) }
     var themeMode by remember { mutableStateOf(ScheduleStore.themeMode(ctx)) }
+    var lastUpdate by remember { mutableStateOf(ScheduleStore.lastAutoUpdate(ctx)) }
     var updateStatus by remember { mutableStateOf("") }
     var isUpdating by remember { mutableStateOf(false) }
     var showGroupDialog by remember { mutableStateOf(false) }
     var showTeacherDialog by remember { mutableStateOf(false) }
-    var showThemeDialog by remember { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
     var teacherInput by remember { mutableStateOf(teacherName) }
     var debugMode by remember { mutableStateOf(false) }
     var totalPairs by remember { mutableStateOf(0) }
@@ -701,6 +708,7 @@ fun SettingsScreen() {
         dndAccessOk = PermissionsHelper.hasDndAccess(ctx)
     }
 
+    // ─── Диалог выбора группы ───
     if (showGroupDialog) {
         AlertDialog(
             onDismissRequest = { showGroupDialog = false },
@@ -715,17 +723,14 @@ fun SettingsScreen() {
                                 showGroupDialog = false
                                 scope.launch(Dispatchers.IO) {
                                     Notifier.scheduleBeforePairs(ctx)
-                                    Notifier.scheduleEndOfPairs(ctx)
                                     Notifier.scheduleDnd(ctx)
                                     ScheduleWidget.updateAll(ctx)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                g,
-                                color = if (g == group) AppColors.Accent else AppColors.TextPrimary
-                            )
+                            Text(g,
+                                color = if (g == group) AppColors.Accent else AppColors.TextPrimary)
                         }
                     }
                 }
@@ -740,6 +745,7 @@ fun SettingsScreen() {
         )
     }
 
+    // ─── Диалог ФИО преподавателя ───
     if (showTeacherDialog) {
         AlertDialog(
             onDismissRequest = { showTeacherDialog = false },
@@ -782,46 +788,50 @@ fun SettingsScreen() {
         )
     }
 
-    // ─── Диалог выбора темы ───
-    if (showThemeDialog) {
+    // ─── Диалог инструкции обновления APK ───
+    if (showUpdateDialog) {
         AlertDialog(
-            onDismissRequest = { showThemeDialog = false },
-            title = { Text("Тема оформления", color = AppColors.TextPrimary) },
+            onDismissRequest = { showUpdateDialog = false },
+            title = {
+                Text("Обновление приложения", color = AppColors.TextPrimary,
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            },
             text = {
                 Column {
-                    ThemeOption(
-                        title = "Авто",
-                        subtitle = "Светлая с 8:00 до 20:00, иначе тёмная",
-                        selected = themeMode == ScheduleStore.THEME_AUTO
-                    ) {
-                        themeMode = ScheduleStore.THEME_AUTO
-                        ScheduleStore.setThemeMode(ctx, ScheduleStore.THEME_AUTO)
-                        showThemeDialog = false
-                    }
-                    ThemeOption(
-                        title = "Светлая",
-                        subtitle = "Всегда светлая тема",
-                        selected = themeMode == ScheduleStore.THEME_LIGHT
-                    ) {
-                        themeMode = ScheduleStore.THEME_LIGHT
-                        ScheduleStore.setThemeMode(ctx, ScheduleStore.THEME_LIGHT)
-                        showThemeDialog = false
-                    }
-                    ThemeOption(
-                        title = "Тёмная",
-                        subtitle = "Всегда тёмная тема",
-                        selected = themeMode == ScheduleStore.THEME_DARK
-                    ) {
-                        themeMode = ScheduleStore.THEME_DARK
-                        ScheduleStore.setThemeMode(ctx, ScheduleStore.THEME_DARK)
-                        showThemeDialog = false
-                    }
+                    Text(
+                        "📥 Как обновить приложение:",
+                        color = AppColors.TextPrimary, fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "1. Нажми «Скачать последнюю версию» ниже — откроется сайт с новым APK.\n\n" +
+                        "2. Скачай файл app-debug.apk.\n\n" +
+                        "3. ⚠️ ВАЖНО: перед установкой удали старую версию приложения (долгое нажатие на иконку → Удалить).\n\n" +
+                        "4. Открой скачанный APK → «Установить».\n\n" +
+                        "5. Готово! Все настройки и расписание загрузятся заново автоматически.",
+                        color = AppColors.TextSecondary, fontSize = 13.sp
+                    )
                 }
             },
-            confirmButton = {},
+            confirmButton = {
+                Button(
+                    onClick = {
+                        try {
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(APK_URL)))
+                        } catch (_: Exception) { }
+                        showUpdateDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) { Text("Скачать последнюю версию") }
+            },
             dismissButton = {
-                TextButton(onClick = { showThemeDialog = false }) {
-                    Text("Закрыть", color = AppColors.TextSecondary)
+                TextButton(onClick = { showUpdateDialog = false }) {
+                    Text("Позже", color = AppColors.TextSecondary)
                 }
             },
             containerColor = AppColors.Card
@@ -835,6 +845,7 @@ fun SettingsScreen() {
 
         LazyColumn(Modifier.fillMaxSize()) {
 
+            // ─── ОСНОВНОЕ ───
             item(key = "sec_main") { SectionTitle("Основное") }
             if (isTeacher) {
                 item(key = "teacher_name") {
@@ -848,12 +859,6 @@ fun SettingsScreen() {
                     SettingRow("Группа", group.ifEmpty { "не выбрана" }) { showGroupDialog = true }
                 }
             }
-
-            // ─── Тема ───
-            item(key = "theme") {
-                SettingRow("Тема", themeLabel(themeMode)) { showThemeDialog = true }
-            }
-
             item(key = "mh") {
                 SettingRow("Утренняя сводка (часы)", "%02d".format(morningH)) {
                     morningH = (morningH + 1) % 24
@@ -877,14 +882,43 @@ fun SettingsScreen() {
                     scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                 }
             }
+
+            // ─── ТЕМА ───
+            item(key = "sec_theme") {
+                Spacer(Modifier.height(16.dp))
+                SectionTitle("Тема оформления")
+            }
+            item(key = "theme") {
+                SettingRow(
+                    title = "Тема",
+                    value = when (themeMode) {
+                        ScheduleStore.THEME_LIGHT -> "Светлая"
+                        ScheduleStore.THEME_DARK -> "Тёмная"
+                        else -> "Авто (8:00–20:00)"
+                    }
+                ) {
+                    themeMode = when (themeMode) {
+                        ScheduleStore.THEME_AUTO -> ScheduleStore.THEME_LIGHT
+                        ScheduleStore.THEME_LIGHT -> ScheduleStore.THEME_DARK
+                        else -> ScheduleStore.THEME_AUTO
+                    }
+                    ScheduleStore.setThemeMode(ctx, themeMode) // мгновенно применится
+                }
+            }
+
+            // ─── УВЕДОМЛЕНИЯ ───
+            item(key = "sec_notif") {
+                Spacer(Modifier.height(16.dp))
+                SectionTitle("Уведомления")
+            }
             item(key = "notify_end") {
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Уведомлять о конце пары", color = AppColors.TextPrimary, fontSize = 16.sp)
-                        Text("Присылать уведомление, когда пара закончилась",
+                        Text("Уведомление о конце пары", color = AppColors.TextPrimary, fontSize = 16.sp)
+                        Text("Сообщать, когда пара закончилась",
                             color = AppColors.TextSecondary, fontSize = 12.sp)
                     }
                     Switch(
@@ -892,7 +926,7 @@ fun SettingsScreen() {
                         onCheckedChange = {
                             notifyEnd = it
                             ScheduleStore.setNotifyEndOfPair(ctx, it)
-                            scope.launch(Dispatchers.IO) { Notifier.scheduleEndOfPairs(ctx) }
+                            scope.launch(Dispatchers.IO) { Notifier.scheduleBeforePairs(ctx) }
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
@@ -904,107 +938,6 @@ fun SettingsScreen() {
                     )
                 }
                 Divider(color = AppColors.Divider)
-            }
-
-            item(key = "sec_auto") {
-                Spacer(Modifier.height(16.dp))
-                SectionTitle("Автообновление с сайта колледжа")
-            }
-            item(key = "auto_switch") {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Обновлять автоматически", color = AppColors.TextPrimary, fontSize = 16.sp)
-                        Text("Раз в сутки с сайта споспк.рф",
-                            color = AppColors.TextSecondary, fontSize = 12.sp)
-                    }
-                    Switch(
-                        checked = autoUpdate,
-                        onCheckedChange = {
-                            autoUpdate = it
-                            ScheduleStore.setAutoUpdate(ctx, it)
-                            ScheduleUpdater.schedule(ctx, it)
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = AppColors.Accent,
-                            uncheckedThumbColor = AppColors.TextDim,
-                            uncheckedTrackColor = AppColors.CardElevated,
-                            uncheckedBorderColor = AppColors.Border
-                        )
-                    )
-                }
-                Divider(color = AppColors.Divider)
-            }
-            item(key = "auto_last") {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Refresh, null,
-                        tint = AppColors.TextDim, modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Последнее обновление", color = AppColors.TextPrimary, fontSize = 15.sp)
-                        Text(formatLastUpdate(lastUpdate),
-                            color = AppColors.TextSecondary, fontSize = 12.sp)
-                    }
-                }
-                Divider(color = AppColors.Divider)
-            }
-            item(key = "auto_now") {
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        isUpdating = true
-                        updateStatus = "Скачиваем…"
-                        scope.launch {
-                            try {
-                                withContext(Dispatchers.IO) {
-                                    ScheduleUpdater.runNow(ctx)
-                                }
-                                kotlinx.coroutines.delay(3000)
-                                lastUpdate = ScheduleStore.lastAutoUpdate(ctx)
-                                totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
-                                updateStatus = "Готово · пар: $totalPairs"
-                            } catch (e: Exception) {
-                                updateStatus = "Ошибка: ${e.message}"
-                            } finally {
-                                isUpdating = false
-                            }
-                        }
-                    },
-                    enabled = !isUpdating,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppColors.Accent,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isUpdating) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(if (isUpdating) "Обновляем…" else "Обновить сейчас")
-                }
-                if (updateStatus.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(updateStatus, color = AppColors.Accent, fontSize = 12.sp)
-                }
-                Spacer(Modifier.height(16.dp))
-            }
-
-            item(key = "sec_dnd") {
-                SectionTitle("Не беспокоить")
             }
             item(key = "dnd_switch") {
                 Row(
@@ -1043,6 +976,127 @@ fun SettingsScreen() {
                 )
             }
 
+            // ─── АВТООБНОВЛЕНИЕ РАСПИСАНИЯ ───
+            item(key = "sec_auto") {
+                Spacer(Modifier.height(16.dp))
+                SectionTitle("Автообновление расписания")
+            }
+            item(key = "auto_switch") {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Обновлять автоматически", color = AppColors.TextPrimary, fontSize = 16.sp)
+                        Text("Раз в сутки с сайта споспк.рф",
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = autoUpdate,
+                        onCheckedChange = {
+                            autoUpdate = it
+                            ScheduleStore.setAutoUpdate(ctx, it)
+                            ScheduleUpdater.schedule(ctx, it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = AppColors.Accent,
+                            uncheckedThumbColor = AppColors.TextDim,
+                            uncheckedTrackColor = AppColors.CardElevated,
+                            uncheckedBorderColor = AppColors.Border
+                        )
+                    )
+                }
+                Divider(color = AppColors.Divider)
+            }
+            item(key = "auto_last") {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Refresh, null,
+                        tint = AppColors.TextDim, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Последнее обновление расписания",
+                            color = AppColors.TextPrimary, fontSize = 15.sp)
+                        Text(formatLastUpdate(lastUpdate),
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                }
+                Divider(color = AppColors.Divider)
+            }
+            item(key = "auto_now") {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        isUpdating = true
+                        updateStatus = "Скачиваем…"
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    ScheduleUpdater.runNow(ctx)
+                                }
+                                kotlinx.coroutines.delay(3000)
+                                lastUpdate = ScheduleStore.lastAutoUpdate(ctx)
+                                totalPairs = ScheduleStore.load(ctx)?.pairs?.size ?: 0
+                                updateStatus = "Готово · пар: $totalPairs"
+                            } catch (e: Exception) {
+                                updateStatus = "Ошибка: ${e.message}"
+                            } finally {
+                                isUpdating = false
+                            }
+                        }
+                    },
+                    enabled = !isUpdating,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isUpdating) {
+                        CircularProgressIndicator(
+                            color = Color.White, strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (isUpdating) "Обновляем…" else "Обновить расписание сейчас")
+                }
+                if (updateStatus.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(updateStatus, color = AppColors.Accent, fontSize = 12.sp)
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
+            // ─── ОБНОВЛЕНИЕ APK ───
+            item(key = "sec_apk") {
+                SectionTitle("Обновление приложения")
+            }
+            item(key = "apk_update") {
+                Row(
+                    Modifier.fillMaxWidth().clickable { showUpdateDialog = true }
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.SystemUpdate, null,
+                        tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Как обновить приложение",
+                            color = AppColors.TextPrimary, fontSize = 15.sp)
+                        Text("Инструкция + скачать последнюю версию",
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                    }
+                    Icon(Icons.Default.KeyboardArrowRight, null, tint = AppColors.TextDim)
+                }
+                Divider(color = AppColors.Divider)
+            }
+
+            // ─── РАЗРЕШЕНИЯ ───
             item(key = "sec_perm") {
                 Spacer(Modifier.height(16.dp))
                 SectionTitle("Разрешения и фоновая работа")
@@ -1078,7 +1132,6 @@ fun SettingsScreen() {
                         scope.launch(Dispatchers.IO) {
                             Notifier.scheduleMorning(ctx)
                             Notifier.scheduleBeforePairs(ctx)
-                            Notifier.scheduleEndOfPairs(ctx)
                             Notifier.scheduleDnd(ctx)
                             RescheduleWorker.schedule(ctx)
                             ScheduleWidget.updateAll(ctx)
@@ -1094,6 +1147,7 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(16.dp))
             }
 
+            // ─── ВЕРСИЯ / DEBUG ───
             item(key = "version") {
                 Surface(
                     color = Color.Transparent,
@@ -1112,7 +1166,7 @@ fun SettingsScreen() {
                         }
                 ) {
                     Text(
-                        "Версия 1.10" + if (debugMode) "  🐛 DEBUG" else "",
+                        "Версия 1.11" + if (debugMode) "  🐛 DEBUG" else "",
                         color = if (debugMode) AppColors.Accent else AppColors.TextDim,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -1136,12 +1190,12 @@ fun SettingsScreen() {
                             DebugLine("Групп", "${groups.size}")
                             DebugLine("Текущая неделя",
                                 if (ScheduleStore.currentWeek(ctx) == WeekType.EVEN) "Чётная" else "Нечётная")
-                            DebugLine("Тема", themeLabel(themeMode))
                             DebugLine("Напоминание за", "$beforeMin мин")
-                            DebugLine("Увед. о конце", if (notifyEnd) "вкл" else "выкл")
                             DebugLine("DND авто-режим", if (dndEnabled) "включен" else "выключен")
+                            DebugLine("Конец пары", if (notifyEnd) "включен" else "выключен")
                             DebugLine("Автообновление", if (autoUpdate) "включено" else "выключено")
                             DebugLine("Последнее обновление", formatLastUpdate(lastUpdate))
+                            DebugLine("Тема", ScheduleStore.themeMode(ctx))
                             Spacer(Modifier.height(12.dp))
                             Button(
                                 onClick = {
@@ -1162,47 +1216,6 @@ fun SettingsScreen() {
             }
         }
     }
-}
-
-@Composable
-fun ThemeOption(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        RadioButton(
-            selected = selected,
-            onClick = onClick,
-            colors = RadioButtonDefaults.colors(
-                selectedColor = AppColors.Accent,
-                unselectedColor = AppColors.TextDim
-            )
-        )
-        Spacer(Modifier.width(6.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                title,
-                color = if (selected) AppColors.Accent else AppColors.TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-            )
-            Text(subtitle, color = AppColors.TextSecondary, fontSize = 12.sp)
-        }
-    }
-}
-
-private fun themeLabel(mode: String): String = when (mode) {
-    ScheduleStore.THEME_LIGHT -> "Светлая"
-    ScheduleStore.THEME_DARK -> "Тёмная"
-    else -> "Авто"
 }
 
 @Composable
@@ -1344,15 +1357,14 @@ fun PairCard(
                     )
                     Spacer(Modifier.height(4.dp))
 
-                    // ─── Аудитория или Онлайн ───
-                    val isOnline = sg.room.equals("Онлайн", ignoreCase = true)
+                    // 🌐 Онлайн или 🏛 аудитория
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isOnline) {
-                            Text("🌐 ", fontSize = 12.sp)
+                        if (isOnline(sg.room)) {
+                            Text("🌐 ", fontSize = 13.sp)
                             Text(
                                 "Онлайн",
-                                color = AppColors.Accent, fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+                                color = AppColors.Accent, fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         } else {
                             Text("🏛 ", fontSize = 12.sp)
@@ -1364,6 +1376,7 @@ fun PairCard(
                         }
                     }
 
+                    // Для преподавателя — группа, для студента — препод
                     if (showGroup) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("👥 ", fontSize = 12.sp)
@@ -1374,14 +1387,12 @@ fun PairCard(
                             )
                         }
                     } else {
-                        if (sg.teacher.isNotBlank()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("👤 ", fontSize = 12.sp)
-                                Text(
-                                    sg.teacher,
-                                    color = AppColors.TextSecondary, fontSize = 13.sp
-                                )
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("👤 ", fontSize = 12.sp)
+                            Text(
+                                sg.teacher.ifEmpty { "—" },
+                                color = AppColors.TextSecondary, fontSize = 13.sp
+                            )
                         }
                     }
                 }
