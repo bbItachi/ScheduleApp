@@ -52,7 +52,7 @@ function saveSettings() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  СКАЧИВАНИЕ ФАЙЛА (локальный schedule.xlsx)
+//  СКАЧИВАНИЕ ЛОКАЛЬНОГО ФАЙЛА
 // ═══════════════════════════════════════════════════════════
 
 async function fetchScheduleBytes(statusEl) {
@@ -76,6 +76,7 @@ function parseXlsx(arrayBuffer) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
 
+  // Ищем строку с "Группа:"
   let groupRow = -1;
   for (let r = 0; r < rows.length; r++) {
     for (let c = 0; c < (rows[r] || []).length; c++) {
@@ -86,6 +87,7 @@ function parseXlsx(arrayBuffer) {
   }
   if (groupRow < 0) throw new Error("Не найдена строка с группами");
 
+  // Собираем группы: col (0-based) → name
   const groups = [];
   const groupRowData = rows[groupRow] || [];
   for (let c = 0; c < groupRowData.length; c++) {
@@ -106,20 +108,24 @@ function parseXlsx(arrayBuffer) {
   for (let r = groupRow + 1; r < rows.length; r++) {
     const row = rows[r] || [];
 
+    // Метка «ЧЕТНАЯ НЕДЕЛЯ»
     for (let c = 0; c < row.length; c++) {
       const v = String(row[c] || "");
       if (/чётная|четная/i.test(v)) { week = "EVEN"; break; }
     }
 
+    // День недели — в 1-3 колонках
     for (let c = 0; c < 3; c++) {
       const v = String(row[c] || "").trim().toUpperCase();
       if (DAYS_RU.includes(v)) { currentDay = v; break; }
     }
 
-    const pairNum = parseInt(String(row[2] || "").trim(), 10);
+    // Номер пары — колонка B (индекс 1)
+    const pairNum = parseInt(String(row[1] || "").trim(), 10);
     if (!pairNum || !currentDay) continue;
 
-    const time = String(row[4] || "").trim();
+    // Время — колонка D (индекс 3)
+    const time = String(row[3] || "").trim();
     if (!time) continue;
 
     for (let i = 0; i < groups.length; i++) {
