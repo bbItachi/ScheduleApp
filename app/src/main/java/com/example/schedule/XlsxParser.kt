@@ -12,9 +12,10 @@ object XlsxParser {
         "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"
     )
 
-    // Известные аудитории, которые не похожи на числа
+    // Известные аудитории, которые не похожи на числа.
+    // ВАЖНО: «ОНЛАЙН» тут НЕТ — его обрабатываем отдельно.
     private val KNOWN_ROOMS = setOf(
-        "ЦРК", "М", "СЗ", "СЗ/1", "СЗ/2", "М/1", "М/2", "ОНЛАЙН"
+        "ЦРК", "М", "СЗ", "СЗ/1", "СЗ/2", "М/1", "М/2"
     )
 
     fun parse(input: InputStream): List<Lesson> {
@@ -40,20 +41,23 @@ object XlsxParser {
         val maxRow = cells.keys.maxOf { rowOf(it) }
         val maxCol = cells.keys.maxOf { colOf(it) }
 
-        // ─── Находим строку с "Группа:" ───
+        // ─── Находим строку с «Группа:» ───
         var groupRow = -1
         for (r in 1..maxRow) {
             for (c in 1..maxCol) {
                 val v = cell(cells, r, c).trim()
                 if (v.equals("Группа:", true) || v.equals("Группа", true)) {
-                    groupRow = r; break
+                    groupRow = r
+                    break
                 }
             }
             if (groupRow > 0) break
         }
         if (groupRow < 0) error("Не найдена строка с группами")
 
-        // ─── Собираем все группы ───
+        // ─── Собираем колонки групп ───
+        // Для каждой группы запоминаем стартовую колонку и имя.
+        // Следующая группа может быть через 1 или 2 колонки — берём данные в диапазоне.
         val groups = mutableListOf<Pair<Int, String>>()
         for (c in 1..maxCol) {
             val v = cell(cells, groupRow, c).trim()
@@ -70,37 +74,39 @@ object XlsxParser {
         var currentDay: String? = null
         var week = WeekType.ODD
 
-        // ─── Идём по строкам начиная с группы ───
         for (r in (groupRow + 1)..maxRow) {
-            // Проверяем метку «ЧЕТНАЯ НЕДЕЛЯ» в любой колонке
+            // Метка «ЧЕТНАЯ НЕДЕЛЯ» в любой колонке
             for (c in 1..maxCol) {
                 val v = cell(cells, r, c)
                 if (v.contains("ЧЕТНАЯ", true) || v.contains("ЧЁТНАЯ", true)) {
-                    week = WeekType.EVEN; break
+                    week = WeekType.EVEN
+                    break
                 }
             }
 
-            // Определяем день недели (ищем в 1-3 колонках)
+            // День недели в колонках 1–3
             for (c in 1..3) {
                 val v = cell(cells, r, c).trim().uppercase()
-                if (v in DAYS) { currentDay = v; break }
+                if (v in DAYS) {
+                    currentDay = v
+                    break
+                }
             }
 
-            // Определяем номер пары (2-я колонка)
+            // Номер пары во 2-й колонке
             val pairNum = cell(cells, r, 2).trim().toIntOrNull()
             if (pairNum == null || currentDay == null) continue
 
-            // Время (4-я колонка)
+            // Время в 4-й колонке
             val time = cell(cells, r, 4).trim()
             if (time.isEmpty()) continue
 
-            // ─── Разбираем данные для каждой группы ───
+            // Обрабатываем каждую группу
             for (i in groups.indices) {
                 val (colStart, groupName) = groups[i]
 
-                // Читаем 4 ячейки предмета/аудитории в текущей строке
+                // Данные группы — 4 колонки: colStart, +1, +2, +3
                 val rowCells = (0..3).map { cell(cells, r, colStart + it).trim() }
-                // И 4 ячейки преподавателей в следующей строке
                 val teachCells = (0..3).map { cell(cells, r + 1, colStart + it).trim() }
 
                 // Классифицируем ячейки: что предмет, что аудитория
@@ -126,7 +132,7 @@ object XlsxParser {
                             subs += SubgroupPair(k + 1, rowCells[si], t, r)
                         }
                     }
-                    // Один предмет (общий для всей группы)
+                    // Один предмет — общий для группы
                     subjectPos.size == 1 -> {
                         val si = subjectPos[0]
                         val ri = roomPos.firstOrNull()
@@ -135,7 +141,7 @@ object XlsxParser {
                         val (t, r) = cleanOnline(teacher, if (ri != null) rowCells[ri] else "")
                         subs += SubgroupPair(1, rowCells[si], t, r)
                     }
-                    // Два предмета, но одна аудитория
+                    // Два предмета, одна аудитория
                     subjectPos.size >= 2 -> {
                         val rawRoom = roomPos.firstOrNull()?.let { rowCells[it] } ?: ""
                         for (k in 0..1) {
@@ -145,29 +151,32 @@ object XlsxParser {
                             subs += SubgroupPair(k + 1, rowCells[si], t, r)
                         }
                     }
-                    // Только аудитории, без предмета (на всякий случай)
-                    roomPos.size >= 1 -> {
-                        for (k in roomPos.indices) {
-                            val ri = roomPos[k]
+                    // Только аудитория без предмета — тоже добавим (на всякий)
+                    roomPos.size >= 1 && teachCells.any { it.isNotEmpty() } -> {
+                        for (k in 0..1) {
+                            val ri = roomPos.getOrNull(k) ?: break
                             val teacher = teachCells.getOrElse(ri) { "" }
-                            subs += SubgroupPair(k + 1, "", teacher, rowCells[ri])
+                            if (teacher.isNotEmpty()) {
+                                val (t, r) = cleanOnline(teacher, rowCells[ri])
+                                subs += SubgroupPair(k + 1, "", t, r)
+                            }
                         }
                     }
                 }
 
                 if (subs.isNotEmpty()) {
-                    result += Lesson(groupName, pairNum, time, currentDay!!, week, subs)
+                    result += Lesson(groupName, pairNum, time, currentDay, week, subs)
                 }
             }
         }
-
         return result
     }
 
     /**
      * Обработка «онлайн»:
      *   «Лизнева К.А. онлайн» → teacher=«Лизнева К.А.», room=«Онлайн»
-     *   «онлайн» → teacher=«», room=«Онлайн»
+     *   «онлайн» (в преподе) → teacher=«», room=«Онлайн»
+     *   «онлайн» (в аудитории) → teacher=«…», room=«Онлайн»
      * Обычные данные не трогает.
      */
     private fun cleanOnline(teacher: String, room: String): Pair<String, String> {
@@ -179,7 +188,6 @@ object XlsxParser {
 
         if (!tHasOnline && !rHasOnline) return t to r
 
-        // Если онлайн в преподе — чистим имя, аудитория становится «Онлайн»
         if (tHasOnline) {
             val cleanT = t.replace(Regex("(?i)\\s*онлайн\\s*"), " ")
                 .trim()
@@ -187,18 +195,14 @@ object XlsxParser {
             return cleanT to "Онлайн"
         }
 
-        // Если онлайн только в аудитории — она превращается в «Онлайн»
-        if (rHasOnline) {
-            return t to "Онлайн"
-        }
-
-        return t to r
+        // Онлайн только в аудитории
+        return t to "Онлайн"
     }
 
     /**
      * Похоже ли значение на аудиторию.
-     * ВАЖНО: если в ячейке есть «онлайн» И какие-то буквы помимо «онлайн» —
-     * это НЕ аудитория (а имя преподавателя). Но если только «онлайн» — аудитория.
+     * ВАЖНО: «онлайн» — это аудитория, НО если в ячейке «Фамилия И.О. онлайн» —
+     * это препод (не аудитория), потому что кроме слова «онлайн» там есть буквы.
      */
     private fun looksLikeRoom(v: String): Boolean {
         if (v.isEmpty()) return false
@@ -210,9 +214,10 @@ object XlsxParser {
                 .replace(Regex("(?i)онлайн"), " ")
                 .trim()
                 .trim(',', '.', ';', '-', '_', ' ')
+
             // Если после удаления «онлайн» остались буквы — это препод
             if (withoutOnline.any { it.isLetter() }) return false
-            // Только «онлайн» — это аудитория
+            // Только «онлайн» (и, может, пробелы) — это аудитория
             return true
         }
 
@@ -221,7 +226,7 @@ object XlsxParser {
         if (upper.startsWith("СЗ/") || upper.startsWith("М/")) return true
         if (upper.startsWith("ЦРК")) return true
 
-        // Классическая аудитория: 1+ цифра, ≤2 буквы, короткое, без пробелов
+        // Классическая аудитория: цифра(ы) + максимум 2 буквы, короткая, без пробелов
         val digits = t.count { it.isDigit() }
         val letters = t.count { it.isLetter() }
         return digits >= 1 && letters <= 2 && t.length <= 10 && !t.contains(' ')
@@ -259,12 +264,20 @@ object XlsxParser {
     private fun rowOf(ref: String): Int = ref.dropWhile { !it.isDigit() }.toIntOrNull() ?: 0
     private fun colOf(ref: String): Int {
         var n = 0
-        for (c in ref) { if (c.isDigit()) break; n = n * 26 + (c.uppercaseChar() - 'A' + 1) }
+        for (c in ref) {
+            if (c.isDigit()) break
+            n = n * 26 + (c.uppercaseChar() - 'A' + 1)
+        }
         return n
     }
     private fun colLetter(col: Int): String {
-        var n = col; val sb = StringBuilder()
-        while (n > 0) { n--; sb.insert(0, ('A' + (n % 26))); n /= 26 }
+        var n = col
+        val sb = StringBuilder()
+        while (n > 0) {
+            n--
+            sb.insert(0, ('A' + (n % 26)))
+            n /= 26
+        }
         return sb.toString()
     }
     private fun cell(cells: Map<String, String>, row: Int, col: Int): String =
