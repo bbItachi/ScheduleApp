@@ -11,13 +11,23 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- SheetJS: каскад CDN, если первый не сработает — попробует следующий -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+if (typeof XLSX === "undefined") {
+  document.write('<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"><\/script>');
+}
+</script>
+<script>
+if (typeof XLSX === "undefined") {
+  document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');
+}
+</script>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════
-     ЭКРАН ЗАГРУЗКИ
-     ═══════════════════════════════════════════════════════════ -->
+<!-- Экран загрузки -->
 <div id="loading-screen" class="screen">
   <div class="loading-content">
     <div class="spinner"></div>
@@ -25,9 +35,7 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════
-     ЭКРАН ЗАГРУЗКИ XLSX
-     ═══════════════════════════════════════════════════════════ -->
+<!-- Онбординг -->
 <div id="onboarding-screen" class="screen hidden">
   <div class="onboarding-content">
     <h1 class="onboarding-title">Добро пожаловать!</h1>
@@ -82,18 +90,19 @@
         <span class="btn-icon">🔄</span>
         Скачать с сайта
       </button>
+      <label class="btn-outline-file">
+        <span class="btn-icon">📤</span>
+        Выбрать файл
+        <input type="file" id="file-input-teacher" accept=".xlsx,.xls" hidden>
+      </label>
     </div>
 
     <button id="btn-start" class="btn-primary btn-start" disabled>Начать</button>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════
-     ГЛАВНОЕ ПРИЛОЖЕНИЕ
-     ═══════════════════════════════════════════════════════════ -->
+<!-- Приложение -->
 <div id="app" class="screen hidden">
-
-  <!-- Шапка -->
   <div class="top-card">
     <div class="top-left">
       <div id="date-text" class="date-text">—</div>
@@ -105,10 +114,8 @@
     </div>
   </div>
 
-  <!-- Плашка «сколько до пары» -->
   <div id="pair-status" class="pair-status hidden"></div>
 
-  <!-- Сегодня -->
   <div id="tab-today" class="tab-content">
     <div id="day-header" class="day-header"></div>
     <div id="pairs-list" class="pairs-list"></div>
@@ -119,7 +126,6 @@
     <input type="file" id="file-input-main" accept=".xlsx,.xls" hidden>
   </div>
 
-  <!-- Неделя -->
   <div id="tab-week" class="tab-content hidden">
     <div class="week-header-row">
       <div class="week-header-title">Неделя</div>
@@ -129,7 +135,6 @@
     <div id="week-list" class="week-list"></div>
   </div>
 
-  <!-- Настройки -->
   <div id="tab-settings" class="tab-content hidden">
     <div class="settings-title">Настройки</div>
 
@@ -158,10 +163,6 @@
       <div class="setting-name">Последнее обновление</div>
       <div id="settings-last-value" class="setting-value">—</div>
     </div>
-    <div id="settings-auto-update" class="setting-row">
-      <div class="setting-name">Автообновление</div>
-      <div id="settings-auto-value" class="setting-value">Вкл</div>
-    </div>
     <button id="btn-update-now" class="btn-primary" style="margin-top:10px">Обновить сейчас</button>
 
     <div class="section-title">О ПРИЛОЖЕНИИ</div>
@@ -169,14 +170,13 @@
       <div class="setting-name">Android-версия (APK)</div>
       <div class="setting-value">↗</div>
     </div>
-    <div class="setting-row">
+    <div id="settings-channel" class="setting-row">
       <div class="setting-name">Канал MAX</div>
       <div class="setting-value">↗</div>
     </div>
     <div class="version-text">Веб-версия 1.0</div>
   </div>
 
-  <!-- Нижняя навигация -->
   <nav class="bottom-nav">
     <button class="nav-btn active" data-tab="today">
       <span class="nav-icon">🏠</span>
