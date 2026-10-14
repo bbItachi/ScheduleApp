@@ -27,23 +27,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Применяем тему ДО setContent
-        if (ScheduleStore.isLightTheme(this)) {
-            AppColors.applyLight()
-        } else {
-            AppColors.applyDark()
+        // Загружаем кэш интернет-времени до всего остального
+        InternetTime.loadCached(this)
+
+        // Синхронизация времени с интернетом (в фоне)
+        CoroutineScope(Dispatchers.IO).launch {
+            InternetTime.sync(applicationContext)
         }
 
+        // Применяем тему ДО setContent
+        if (ScheduleStore.isLightTheme(this)) AppColors.applyLight()
+        else AppColors.applyDark()
+
         Notifier.ensureChannels(this)
+
+        // Перепланируем все будильники
+        Notifier.scheduleMorning(this)
+        Notifier.scheduleBothDailyUpdates(this)
         RescheduleWorker.schedule(this)
 
-        val enabled = ScheduleStore.autoUpdate(this)
-        ScheduleUpdater.schedule(this, enabled)
+        ScheduleUpdater.schedule(this, ScheduleStore.autoUpdate(this))
         ScheduleWidget.updateAll(this)
 
         maybeAutoUpdateSchedule()
@@ -76,8 +87,10 @@ fun RootApp() {
     var showOnboarding by remember {
         mutableStateOf(ScheduleStore.role(ctx).isEmpty())
     }
+    var showQuickSettings by remember {
+        mutableStateOf(false)
+    }
 
-    // ─── Реактивная тема ───
     val themeRev = ScheduleStore.themeRevision
     key(themeRev) {
         val isLight = ScheduleStore.isLightTheme(ctx)
@@ -87,10 +100,22 @@ fun RootApp() {
             colorScheme = if (isLight) ScheduleLightScheme else ScheduleDarkScheme
         ) {
             Surface(Modifier.fillMaxSize(), color = AppColors.Background) {
-                if (showOnboarding) {
-                    OnboardingScreen(onDone = { showOnboarding = false })
-                } else {
-                    App()
+                when {
+                    showOnboarding -> {
+                        OnboardingScreen(onDone = {
+                            showOnboarding = false
+                            if (!ScheduleStore.settingsDialogShown(ctx)) {
+                                showQuickSettings = true
+                            }
+                        })
+                    }
+                    showQuickSettings -> {
+                        QuickSettingsDialog(onClose = {
+                            ScheduleStore.setSettingsDialogShown(ctx, true)
+                            showQuickSettings = false
+                        })
+                    }
+                    else -> App()
                 }
             }
         }
@@ -123,9 +148,7 @@ fun App() {
                             dragAccum = 0f
                         },
                         onDragCancel = { dragAccum = 0f },
-                        onHorizontalDrag = { _, dragAmount ->
-                            dragAccum += dragAmount
-                        }
+                        onHorizontalDrag = { _, dragAmount -> dragAccum += dragAmount }
                     )
                 }
         ) {
@@ -134,12 +157,10 @@ fun App() {
                 transitionSpec = {
                     val forward = targetState > initialState
                     val offset = if (forward) 1 else -1
-                    (slideInHorizontally(animationSpec = tween(220)) { full ->
-                        offset * full
-                    } + fadeIn(animationSpec = tween(180))) togetherWith
-                    (slideOutHorizontally(animationSpec = tween(220)) { full ->
-                        -offset * full
-                    } + fadeOut(animationSpec = tween(180)))
+                    (slideInHorizontally(animationSpec = tween(220)) { full -> offset * full } +
+                            fadeIn(animationSpec = tween(180))) togetherWith
+                            (slideOutHorizontally(animationSpec = tween(220)) { full -> -offset * full } +
+                                    fadeOut(animationSpec = tween(180)))
                 },
                 label = "tab"
             ) { target ->
@@ -150,27 +171,21 @@ fun App() {
                 }
             }
         }
-        NavigationBar(
-            containerColor = AppColors.Card,
-            contentColor = AppColors.TextPrimary
-        ) {
+        NavigationBar(containerColor = AppColors.Card, contentColor = AppColors.TextPrimary) {
             NavigationBarItem(
                 selected = tab == 0, onClick = { tab = 0 },
                 icon = { Icon(Icons.Default.Home, null) },
-                label = { Text("Сегодня") },
-                colors = navColors
+                label = { Text("Сегодня") }, colors = navColors
             )
             NavigationBarItem(
                 selected = tab == 1, onClick = { tab = 1 },
                 icon = { Icon(Icons.Default.DateRange, null) },
-                label = { Text("Неделя") },
-                colors = navColors
+                label = { Text("Неделя") }, colors = navColors
             )
             NavigationBarItem(
                 selected = tab == 2, onClick = { tab = 2 },
                 icon = { Icon(Icons.Default.Settings, null) },
-                label = { Text("Настройки") },
-                colors = navColors
+                label = { Text("Настройки") }, colors = navColors
             )
         }
     }
