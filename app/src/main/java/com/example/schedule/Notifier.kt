@@ -23,8 +23,7 @@ object Notifier {
 
         nm.createNotificationChannel(
             NotificationChannel(
-                CH_MORNING, "Утренняя сводка",
-                NotificationManager.IMPORTANCE_DEFAULT
+                CH_MORNING, "Утренняя сводка", NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Пары на сегодня"
                 enableLights(true)
@@ -35,8 +34,7 @@ object Notifier {
 
         nm.createNotificationChannel(
             NotificationChannel(
-                CH_BEFORE, "Перед парой",
-                NotificationManager.IMPORTANCE_HIGH
+                CH_BEFORE, "Перед парой", NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Напоминание за несколько минут до пары"
                 enableLights(true)
@@ -48,13 +46,12 @@ object Notifier {
 
         nm.createNotificationChannel(
             NotificationChannel(
-                CH_END, "Конец пары",
-                NotificationManager.IMPORTANCE_DEFAULT
+                CH_END, "Конец пары", NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Уведомление о завершении пары"
+                description = "Уведомление об окончании пары"
                 enableLights(true)
                 lightColor = 0xFF3B82F6.toInt()
-                setShowBadge(false)
+                setShowBadge(true)
             }
         )
     }
@@ -123,18 +120,27 @@ object Notifier {
         val target = if (isTeacher) ScheduleStore.teacherName(ctx) else ScheduleStore.group(ctx)
         if (target.isEmpty()) return
         val before = ScheduleStore.beforeMinutes(ctx)
+        val notifyEnd = ScheduleStore.notifyEndOfPair(ctx)
 
-        for (i in 0..200) {
+        // Отменяем старые
+        for (i in 0..400) {
             val pi = PendingIntent.getBroadcast(
                 ctx, 3000 + i,
                 Intent(ctx, AlarmReceiver::class.java).apply { action = "before" },
                 PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
             )
             if (pi != null) am.cancel(pi)
+            val piEnd = PendingIntent.getBroadcast(
+                ctx, 7000 + i,
+                Intent(ctx, AlarmReceiver::class.java).apply { action = "end" },
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (piEnd != null) am.cancel(piEnd)
         }
 
         val today = Calendar.getInstance()
         var reqCode = 3000
+        var endCode = 7000
 
         for (dayOffset in 0 until DAYS_AHEAD) {
             val dayCal = today.clone() as Calendar
@@ -148,6 +154,7 @@ object Notifier {
             }
 
             pairs.forEach { pair ->
+                // ── За N минут до пары ──
                 val (ph, pm) = parseStartMinutes(pair.time) ?: return@forEach
                 val pairCal = dayCal.clone() as Calendar
                 pairCal.set(Calendar.HOUR_OF_DAY, ph)
@@ -155,90 +162,58 @@ object Notifier {
                 pairCal.set(Calendar.SECOND, 0)
                 pairCal.set(Calendar.MILLISECOND, 0)
                 pairCal.add(Calendar.MINUTE, -before)
-                if (pairCal.timeInMillis <= System.currentTimeMillis()) return@forEach
 
-                val intent = Intent(ctx, AlarmReceiver::class.java).apply {
-                    action = "before"
-                    putExtra("subject", pair.subgroups.joinToString(" / ") { it.subject })
-                    putExtra("room", pair.subgroups.joinToString(" / ") { it.room })
-                    putExtra("teacher", pair.subgroups.joinToString(" / ") { it.teacher })
-                    putExtra("group", pair.group)
-                    putExtra("time", pair.time)
-                    putExtra("num", pair.number)
-                    putExtra("before", before)
+                if (pairCal.timeInMillis > System.currentTimeMillis()) {
+                    val intent = Intent(ctx, AlarmReceiver::class.java).apply {
+                        action = "before"
+                        putExtra("subject", pair.subgroups.joinToString(" / ") { it.subject })
+                        putExtra("room", pair.subgroups.joinToString(" / ") { it.room })
+                        putExtra("teacher", pair.subgroups.joinToString(" / ") { it.teacher })
+                        putExtra("group", pair.group)
+                        putExtra("time", pair.time)
+                        putExtra("num", pair.number)
+                        putExtra("before", before)
+                    }
+                    val pi = PendingIntent.getBroadcast(
+                        ctx, reqCode, intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    try {
+                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, pairCal.timeInMillis, pi)
+                    } catch (_: SecurityException) {
+                        am.set(AlarmManager.RTC_WAKEUP, pairCal.timeInMillis, pi)
+                    }
+                    reqCode++
                 }
-                val pi = PendingIntent.getBroadcast(
-                    ctx, reqCode, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                try {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, pairCal.timeInMillis, pi)
-                } catch (_: SecurityException) {
-                    am.set(AlarmManager.RTC_WAKEUP, pairCal.timeInMillis, pi)
+
+                // ── Уведомление о КОНЦЕ пары ──
+                if (notifyEnd) {
+                    val (eh, em) = parseEndMinutes(pair.time) ?: return@forEach
+                    val endCal = dayCal.clone() as Calendar
+                    endCal.set(Calendar.HOUR_OF_DAY, eh)
+                    endCal.set(Calendar.MINUTE, em)
+                    endCal.set(Calendar.SECOND, 0)
+                    endCal.set(Calendar.MILLISECOND, 0)
+
+                    if (endCal.timeInMillis > System.currentTimeMillis()) {
+                        val intent = Intent(ctx, AlarmReceiver::class.java).apply {
+                            action = "end"
+                            putExtra("num", pair.number)
+                            putExtra("time", pair.time)
+                            putExtra("subject", pair.subgroups.joinToString(" / ") { it.subject })
+                        }
+                        val pi = PendingIntent.getBroadcast(
+                            ctx, endCode, intent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+                        try {
+                            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pi)
+                        } catch (_: SecurityException) {
+                            am.set(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pi)
+                        }
+                        endCode++
+                    }
                 }
-                reqCode++
-            }
-        }
-    }
-
-    // Уведомление о КОНЦЕ пары
-    fun scheduleEndOfPairs(ctx: Context) {
-        val am = ctx.getSystemService(AlarmManager::class.java)
-
-        // Отмена старых (8000..8400)
-        for (i in 0..400) {
-            val pi = PendingIntent.getBroadcast(
-                ctx, 8000 + i,
-                Intent(ctx, AlarmReceiver::class.java).apply { action = "end" },
-                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-            )
-            if (pi != null) am.cancel(pi)
-        }
-
-        if (!ScheduleStore.notifyEndOfPair(ctx)) return
-
-        val isTeacher = ScheduleStore.isTeacher(ctx)
-        val target = if (isTeacher) ScheduleStore.teacherName(ctx) else ScheduleStore.group(ctx)
-        if (target.isEmpty()) return
-
-        val today = Calendar.getInstance()
-        var reqCode = 8000
-
-        for (dayOffset in 0 until DAYS_AHEAD) {
-            val dayCal = today.clone() as Calendar
-            dayCal.add(Calendar.DAY_OF_YEAR, dayOffset)
-            val dayName = ScheduleStore.dayNameRuFor(dayCal)
-            val week = ScheduleStore.weekFor(ctx, dayCal)
-            val pairs = if (isTeacher) {
-                ScheduleStore.pairsForTeacher(ctx, dayName, week, target)
-            } else {
-                ScheduleStore.pairsForDay(ctx, dayName, week, target)
-            }
-
-            pairs.forEach { pair ->
-                val (eh, em) = parseEndMinutes(pair.time) ?: return@forEach
-                val endCal = dayCal.clone() as Calendar
-                endCal.set(Calendar.HOUR_OF_DAY, eh)
-                endCal.set(Calendar.MINUTE, em)
-                endCal.set(Calendar.SECOND, 0)
-                endCal.set(Calendar.MILLISECOND, 0)
-                if (endCal.timeInMillis <= System.currentTimeMillis()) return@forEach
-
-                val intent = Intent(ctx, AlarmReceiver::class.java).apply {
-                    action = "end"
-                    putExtra("subject", pair.subgroups.joinToString(" / ") { it.subject })
-                    putExtra("num", pair.number)
-                }
-                val pi = PendingIntent.getBroadcast(
-                    ctx, reqCode, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                try {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pi)
-                } catch (_: SecurityException) {
-                    am.set(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pi)
-                }
-                reqCode++
             }
         }
     }
@@ -341,7 +316,7 @@ object Notifier {
                     val contentPi = openAppPendingIntent(ctx)
 
                     if (pairs.isEmpty()) {
-                        val n = NotificationCompat.Builder(ctx, CH_MORNING)
+                        nm.notify(1, NotificationCompat.Builder(ctx, CH_MORNING)
                             .setSmallIcon(R.drawable.ic_notification)
                             .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
                             .setColor(0xFF3B82F6.toInt())
@@ -350,8 +325,7 @@ object Notifier {
                             .setContentIntent(contentPi)
                             .setAutoCancel(true)
                             .setGroup(GROUP_KEY)
-                            .build()
-                        nm.notify(1, n)
+                            .build())
                     } else {
                         val style = NotificationCompat.InboxStyle()
                         for (p in pairs.take(10)) {
@@ -360,13 +334,10 @@ object Notifier {
                             val grpTag = if (isTeacher) " · ${p.group}" else ""
                             style.addLine("${p.number}. ${p.time}  ·  $subj$grpTag")
                         }
-                        if (pairs.size > 10) {
-                            style.setSummaryText("Всего ${pairs.size} пар")
-                        } else {
-                            style.setSummaryText("Всего ${pairs.size} ${plural(pairs.size, "пара", "пары", "пар")}")
-                        }
+                        if (pairs.size > 10) style.setSummaryText("Всего ${pairs.size} пар")
+                        else style.setSummaryText("Всего ${pairs.size} ${plural(pairs.size, "пара", "пары", "пар")}")
 
-                        val n = NotificationCompat.Builder(ctx, CH_MORNING)
+                        nm.notify(1, NotificationCompat.Builder(ctx, CH_MORNING)
                             .setSmallIcon(R.drawable.ic_notification)
                             .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
                             .setColor(0xFF3B82F6.toInt())
@@ -377,8 +348,7 @@ object Notifier {
                             .setAutoCancel(true)
                             .setGroup(GROUP_KEY)
                             .setShowWhen(true)
-                            .build()
-                        nm.notify(1, n)
+                            .build())
                     }
                     scheduleMorning(ctx)
                 }
@@ -396,28 +366,22 @@ object Notifier {
                     val contentPi = openAppPendingIntent(ctx)
                     val isTeacher = ScheduleStore.isTeacher(ctx)
 
-                    val isOnline = room.equals("Онлайн", true)
-                    val roomLine = if (isOnline) "🌐  Онлайн" else "🏛  Аудитория: $room"
-
                     val bigText = buildString {
                         append(subject).append("\n\n")
-                        append(roomLine).append("\n")
-                        if (isTeacher) {
-                            append("👥  Группа: ").append(group).append("\n")
-                        } else {
-                            append("👤  Преподаватель: ").append(teacher).append("\n")
-                        }
+                        append("🏛  Аудитория: ").append(room).append("\n")
+                        if (isTeacher) append("👥  Группа: ").append(group).append("\n")
+                        else append("👤  Преподаватель: ").append(teacher).append("\n")
                         append("🕐  Время: ").append(time).append("\n")
                     }
 
-                    val n = NotificationCompat.Builder(ctx, CH_BEFORE)
+                    nm.notify(200 + num, NotificationCompat.Builder(ctx, CH_BEFORE)
                         .setSmallIcon(R.drawable.ic_notification)
                         .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
                         .setColor(0xFF3B82F6.toInt())
                         .setContentTitle("Через $before мин · пара $num")
                         .setContentText(
-                            if (isTeacher) "$subject · гр. $group" + if (isOnline) " · 🌐 Онлайн" else " · ауд. $room"
-                            else "$subject" + if (isOnline) " · 🌐 Онлайн" else " · ауд. $room"
+                            if (isTeacher) "$subject · гр. $group · ауд. $room"
+                            else "$subject · ауд. $room"
                         )
                         .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
                         .setContentIntent(contentPi)
@@ -425,28 +389,28 @@ object Notifier {
                         .setGroup(GROUP_KEY)
                         .setCategory(NotificationCompat.CATEGORY_EVENT)
                         .setShowWhen(true)
-                        .build()
-                    nm.notify(200 + num, n)
+                        .build())
                 }
 
+                // ─── Уведомление о КОНЦЕ пары ───
                 "end" -> {
-                    val subject = intent.getStringExtra("subject") ?: ""
                     val num = intent.getIntExtra("num", 0)
-
+                    val subject = intent.getStringExtra("subject") ?: ""
+                    val time = intent.getStringExtra("time") ?: ""
                     val largeIcon = getLargeIcon(ctx)
                     val contentPi = openAppPendingIntent(ctx)
 
-                    val n = NotificationCompat.Builder(ctx, CH_END)
+                    nm.notify(400 + num, NotificationCompat.Builder(ctx, CH_END)
                         .setSmallIcon(R.drawable.ic_notification)
                         .apply { if (largeIcon != null) setLargeIcon(largeIcon) }
                         .setColor(0xFF3B82F6.toInt())
-                        .setContentTitle("🔔 Пара $num закончилась")
-                        .setContentText(subject)
+                        .setContentTitle("Пара $num закончилась")
+                        .setContentText("$subject · $time")
                         .setContentIntent(contentPi)
                         .setAutoCancel(true)
                         .setGroup(GROUP_KEY)
-                        .build()
-                    nm.notify(400 + num, n)
+                        .setShowWhen(true)
+                        .build())
                 }
 
                 "dnd_on" -> {
