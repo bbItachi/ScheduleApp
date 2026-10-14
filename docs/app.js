@@ -2,22 +2,12 @@
 //  КОНСТАНТЫ
 // ═══════════════════════════════════════════════════════════
 
-const RAW_URL = "http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx";
-
-// Каскад прокси — пробуем по очереди
-const PROXIES = [
-  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`,
-  u => `https://thingproxy.freeboard.io/fetch/${u}`,
-  u => `https://cors.eu.org/${u}`
-];
-
+const RAW_URL = "./schedule.xlsx";
 const APK_URL = "https://github.com/bbItachi/ScheduleApp/releases/latest";
 const CHANNEL_URL = "https://max.ru/channel_rasp_spk";
 const STORAGE_KEY = "spk_schedule";
 const SETTINGS_KEY = "spk_settings";
-const BASE_WEEK = new Date(2026, 9, 5);
+const BASE_WEEK = new Date(2026, 9, 5); // 5 октября 2026 (месяц 0-indexed)
 const DAYS_RU = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"];
 
 // ═══════════════════════════════════════════════════════════
@@ -62,45 +52,29 @@ function saveSettings() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  СКАЧИВАНИЕ С КАСКАДОМ ПРОКСИ
+//  СКАЧИВАНИЕ ФАЙЛА (локальный schedule.xlsx)
 // ═══════════════════════════════════════════════════════════
 
 async function fetchScheduleBytes(statusEl) {
-  let lastErr = "все прокси не сработали";
-  for (let i = 0; i < PROXIES.length; i++) {
-    const url = PROXIES[i](RAW_URL);
-    try {
-      if (statusEl) statusEl.textContent = `Скачиваем (способ ${i + 1}/${PROXIES.length})…`;
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) { lastErr = "HTTP " + res.status; continue; }
-      const buf = await res.arrayBuffer();
-      // Проверка: если размер < 1 КБ — скорее всего пришёл HTML, а не xlsx
-      if (buf.byteLength < 1024) { lastErr = "файл слишком маленький"; continue; }
-      // Проверка сигнатуры ZIP (xlsx — это ZIP с PK в начале)
-      const view = new Uint8Array(buf.slice(0, 4));
-      const isZip = view[0] === 0x50 && view[1] === 0x4B;
-      if (!isZip) { lastErr = "не xlsx (получен HTML)"; continue; }
-      return buf;
-    } catch (e) {
-      lastErr = e.message || "network";
-    }
-  }
-  throw new Error(lastErr);
+  if (statusEl) statusEl.textContent = "Загружаем расписание…";
+  const res = await fetch(RAW_URL + "?t=" + Date.now(), { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status + " — файл не найден");
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength < 1024) throw new Error("Файл повреждён");
+  return buf;
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПАРСИНГ XLSX
+//  ПАРСИНГ XLSX (SheetJS)
 // ═══════════════════════════════════════════════════════════
 
 function parseXlsx(arrayBuffer) {
   if (typeof XLSX === "undefined") {
-    throw new Error("Библиотека XLSX не загрузилась. Проверь интернет и обнови страницу.");
+    throw new Error("Библиотека XLSX не загрузилась");
   }
   const wb = XLSX.read(arrayBuffer, { type: "array" });
-  console.log("📋 Листы:", wb.SheetNames);
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
-  console.log("📋 Строк в листе:", rows.length);
 
   let groupRow = -1;
   for (let r = 0; r < rows.length; r++) {
@@ -110,7 +84,6 @@ function parseXlsx(arrayBuffer) {
     }
     if (groupRow >= 0) break;
   }
-  console.log("📋 Строка с группами:", groupRow);
   if (groupRow < 0) throw new Error("Не найдена строка с группами");
 
   const groups = [];
@@ -124,7 +97,6 @@ function parseXlsx(arrayBuffer) {
     if (v.length < 3 || v.length > 40) continue;
     groups.push({ col: c, name: v });
   }
-  console.log("📋 Найдено групп:", groups.length);
   if (groups.length === 0) throw new Error("Группы не найдены");
 
   const result = [];
@@ -201,7 +173,6 @@ function parseXlsx(arrayBuffer) {
       }
     }
   }
-  console.log("✅ Распарсено пар:", result.length);
   return result;
 }
 
@@ -488,7 +459,7 @@ function formatLastUpdate(ts) {
 // ═══════════════════════════════════════════════════════════
 
 async function downloadFromSite(statusEl) {
-  if (statusEl) statusEl.textContent = "Скачиваем…";
+  if (statusEl) statusEl.textContent = "Загружаем…";
   try {
     const buf = await fetchScheduleBytes(statusEl);
     const parsed = parseXlsx(buf);
@@ -583,7 +554,6 @@ function setupOnboarding() {
   document.getElementById("btn-download-site").addEventListener("click", autoDownload);
   document.getElementById("btn-download-site-teacher").addEventListener("click", autoDownload);
 
-  // Загрузка файла вручную — студент
   document.getElementById("file-input").addEventListener("change", async (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -606,7 +576,6 @@ function setupOnboarding() {
     updateStartBtn();
   });
 
-  // Загрузка файла вручную — преподаватель
   document.getElementById("file-input-teacher").addEventListener("change", async (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -667,7 +636,7 @@ function startApp() {
   document.getElementById("btn-refresh").addEventListener("click", async () => {
     const ok = await downloadFromSite(null);
     if (ok) { renderToday(); renderHeader(); }
-    else alert("Не удалось скачать расписание. Попробуй загрузить файл вручную — кнопка 📤 справа.");
+    else alert("Не удалось загрузить расписание. Попробуй загрузить файл вручную — кнопка 📤 справа.");
   });
 
   document.getElementById("btn-upload").addEventListener("click", () => {
@@ -710,7 +679,7 @@ function startApp() {
   document.getElementById("btn-update-now").addEventListener("click", async () => {
     const ok = await downloadFromSite(null);
     renderSettings(); renderToday(); renderHeader();
-    if (!ok) alert("Не удалось скачать. Загрузи файл вручную через главный экран.");
+    if (!ok) alert("Не удалось загрузить. Проверь, что schedule.xlsx лежит рядом с index.html.");
   });
 
   document.getElementById("settings-apk").addEventListener("click", () => window.open(APK_URL, "_blank"));
