@@ -2,7 +2,7 @@
 //  КОНСТАНТЫ
 // ═══════════════════════════════════════════════════════════
 
-const SCHEDULE_URL = "http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx";
+const SCHEDULE_URL = "https://api.allorigins.win/raw?url=http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx";
 const APK_URL = "https://github.com/bbItachi/ScheduleApp/releases/latest";
 const CHANNEL_URL = "https://max.ru/channel_rasp_spk";
 const STORAGE_KEY = "spk_schedule";
