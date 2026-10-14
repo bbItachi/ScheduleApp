@@ -2,6 +2,9 @@ package com.example.schedule
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.Calendar
@@ -24,6 +27,12 @@ object ScheduleStore {
     const val THEME_DARK = "DARK"
     const val THEME_LIGHT = "LIGHT"
 
+    // ─── Реактивные счётчики для Compose ───
+    var themeRevision by mutableStateOf(0)
+        private set
+    var settingsRevision by mutableStateOf(0)
+        private set
+
     private var scheduleCache: SavedSchedule? = null
     private var scheduleLoaded = false
     private var notesCache: List<Note>? = null
@@ -37,7 +46,7 @@ object ScheduleStore {
         return p
     }
 
-    // ─── Расписание ───
+    fun bumpSettings() { settingsRevision++ }
 
     fun save(ctx: Context, pairs: List<Lesson>) {
         val data = SavedSchedule(pairs, System.currentTimeMillis())
@@ -82,6 +91,7 @@ object ScheduleStore {
     fun teacherName(ctx: Context): String = prefs(ctx).getString("teacher_name", "") ?: ""
     fun setTeacherName(ctx: Context, n: String) {
         prefs(ctx).edit().putString("teacher_name", n).apply()
+        bumpSettings()
     }
 
     fun subscribed(ctx: Context): Boolean = prefs(ctx).getBoolean("subscribed", false)
@@ -95,6 +105,7 @@ object ScheduleStore {
     fun setGroup(ctx: Context, g: String) {
         prefs(ctx).edit().putString("group", g).apply()
         pairsCache.clear()
+        bumpSettings()
     }
 
     // ─── Настройки ───
@@ -103,42 +114,47 @@ object ScheduleStore {
     fun morningMinute(ctx: Context): Int = prefs(ctx).getInt("morning_minute", 0)
     fun setMorning(ctx: Context, h: Int, m: Int) {
         prefs(ctx).edit().putInt("morning_hour", h).putInt("morning_minute", m).apply()
+        bumpSettings()
     }
 
     fun beforeMinutes(ctx: Context): Int = prefs(ctx).getInt("before_min", 15)
     fun setBeforeMinutes(ctx: Context, m: Int) {
         prefs(ctx).edit().putInt("before_min", m).apply()
+        bumpSettings()
     }
 
     fun dndEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean("dnd_enabled", false)
     fun setDndEnabled(ctx: Context, v: Boolean) {
         prefs(ctx).edit().putBoolean("dnd_enabled", v).apply()
+        bumpSettings()
     }
 
     fun autoUpdate(ctx: Context): Boolean = prefs(ctx).getBoolean("auto_update", false)
     fun setAutoUpdate(ctx: Context, v: Boolean) {
         prefs(ctx).edit().putBoolean("auto_update", v).apply()
+        bumpSettings()
     }
 
     fun lastAutoUpdate(ctx: Context): Long = prefs(ctx).getLong("last_auto_update", 0)
     fun setLastAutoUpdate(ctx: Context, t: Long) {
         prefs(ctx).edit().putLong("last_auto_update", t).apply()
+        bumpSettings()
     }
 
-    // ─── Тема ───
+    // ─── Тема (реактивная) ───
 
     fun themeMode(ctx: Context): String =
         prefs(ctx).getString("theme_mode", THEME_AUTO) ?: THEME_AUTO
 
     fun setThemeMode(ctx: Context, mode: String) {
         prefs(ctx).edit().putString("theme_mode", mode).apply()
+        themeRevision++
     }
 
     fun isLightTheme(ctx: Context): Boolean = when (themeMode(ctx)) {
         THEME_LIGHT -> true
         THEME_DARK -> false
         else -> {
-            // Авто: 8:00 – 20:00 — светлая, иначе тёмная
             val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
             h in 8 until 20
         }
@@ -151,6 +167,7 @@ object ScheduleStore {
 
     fun setNotifyEndOfPair(ctx: Context, v: Boolean) {
         prefs(ctx).edit().putBoolean("notify_end", v).apply()
+        bumpSettings()
     }
 
     // ─── Избранное / пропуск ───
@@ -203,7 +220,7 @@ object ScheduleStore {
         saveNotes(ctx, cur)
     }
 
-    // ─── Данные для ученика ───
+    // ─── Данные ───
 
     fun pairsFor(ctx: Context, day: String, week: WeekType): List<Lesson> {
         val g = group(ctx)
@@ -228,8 +245,6 @@ object ScheduleStore {
 
     fun allGroups(ctx: Context): List<String> =
         load(ctx)?.pairs?.map { it.group }?.distinct()?.sorted() ?: emptyList()
-
-    // ─── Данные для преподавателя ───
 
     fun pairsForTeacher(ctx: Context, day: String, week: WeekType, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
@@ -315,7 +330,7 @@ object ScheduleStore {
     }
 
     fun currentWeek(ctx: Context): WeekType = autoWeekFor(Calendar.getInstance())
-    fun setCurrentWeek(ctx: Context, week: WeekType) { /* не используется */ }
+    fun setCurrentWeek(ctx: Context, week: WeekType) { }
 
     fun timeToMinutes(t: String): Int? {
         val clean = t.trim().replace(':', '.')
