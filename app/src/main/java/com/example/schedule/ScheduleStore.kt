@@ -2,9 +2,6 @@ package com.example.schedule
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.Calendar
@@ -27,10 +24,9 @@ object ScheduleStore {
     const val THEME_DARK = "DARK"
     const val THEME_LIGHT = "LIGHT"
 
-    // ─── Реактивные счётчики для Compose ───
-    var themeRevision by mutableStateOf(0)
+    var themeRevision by androidx.compose.runtime.mutableStateOf(0)
         private set
-    var settingsRevision by mutableStateOf(0)
+    var settingsRevision by androidx.compose.runtime.mutableStateOf(0)
         private set
 
     private var scheduleCache: SavedSchedule? = null
@@ -80,11 +76,8 @@ object ScheduleStore {
     }
 
     // ─── Роль ───
-
     fun role(ctx: Context): String = prefs(ctx).getString("role", "") ?: ""
-    fun setRole(ctx: Context, r: String) {
-        prefs(ctx).edit().putString("role", r).apply()
-    }
+    fun setRole(ctx: Context, r: String) { prefs(ctx).edit().putString("role", r).apply() }
     fun isTeacher(ctx: Context): Boolean = role(ctx) == ROLE_TEACHER
     fun isStudent(ctx: Context): Boolean = role(ctx) == ROLE_STUDENT
 
@@ -95,12 +88,16 @@ object ScheduleStore {
     }
 
     fun subscribed(ctx: Context): Boolean = prefs(ctx).getBoolean("subscribed", false)
-    fun setSubscribed(ctx: Context, v: Boolean) {
-        prefs(ctx).edit().putBoolean("subscribed", v).apply()
+    fun setSubscribed(ctx: Context, v: Boolean) { prefs(ctx).edit().putBoolean("subscribed", v).apply() }
+
+    // ─── Диалог настроек при первом запуске ───
+    fun settingsDialogShown(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("settings_dialog_shown", false)
+    fun setSettingsDialogShown(ctx: Context, v: Boolean) {
+        prefs(ctx).edit().putBoolean("settings_dialog_shown", v).apply()
     }
 
     // ─── Группа ───
-
     fun group(ctx: Context): String = prefs(ctx).getString("group", "") ?: ""
     fun setGroup(ctx: Context, g: String) {
         prefs(ctx).edit().putString("group", g).apply()
@@ -109,7 +106,6 @@ object ScheduleStore {
     }
 
     // ─── Настройки ───
-
     fun morningHour(ctx: Context): Int = prefs(ctx).getInt("morning_hour", 7)
     fun morningMinute(ctx: Context): Int = prefs(ctx).getInt("morning_minute", 0)
     fun setMorning(ctx: Context, h: Int, m: Int) {
@@ -141,11 +137,15 @@ object ScheduleStore {
         bumpSettings()
     }
 
-    // ─── Тема (реактивная) ───
+    fun notifyEndOfPair(ctx: Context): Boolean = prefs(ctx).getBoolean("notify_end", false)
+    fun setNotifyEndOfPair(ctx: Context, v: Boolean) {
+        prefs(ctx).edit().putBoolean("notify_end", v).apply()
+        bumpSettings()
+    }
 
+    // ─── Тема ───
     fun themeMode(ctx: Context): String =
         prefs(ctx).getString("theme_mode", THEME_AUTO) ?: THEME_AUTO
-
     fun setThemeMode(ctx: Context, mode: String) {
         prefs(ctx).edit().putString("theme_mode", mode).apply()
         themeRevision++
@@ -155,26 +155,14 @@ object ScheduleStore {
         THEME_LIGHT -> true
         THEME_DARK -> false
         else -> {
-            val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            val h = InternetTime.calendar().get(Calendar.HOUR_OF_DAY)
             h in 8 until 20
         }
     }
 
-    // ─── Уведомление о конце пары ───
-
-    fun notifyEndOfPair(ctx: Context): Boolean =
-        prefs(ctx).getBoolean("notify_end", false)
-
-    fun setNotifyEndOfPair(ctx: Context, v: Boolean) {
-        prefs(ctx).edit().putBoolean("notify_end", v).apply()
-        bumpSettings()
-    }
-
     // ─── Избранное / пропуск ───
-
     fun favorites(ctx: Context): Set<String> =
         prefs(ctx).getStringSet("favorites", emptySet()) ?: emptySet()
-
     fun toggleFavorite(ctx: Context, key: String): Boolean {
         val cur = favorites(ctx).toMutableSet()
         val added = if (key in cur) { cur.remove(key); false } else { cur.add(key); true }
@@ -184,7 +172,6 @@ object ScheduleStore {
 
     fun skipped(ctx: Context): Set<String> =
         prefs(ctx).getStringSet("skipped", emptySet()) ?: emptySet()
-
     fun toggleSkipped(ctx: Context, key: String): Boolean {
         val cur = skipped(ctx).toMutableSet()
         val added = if (key in cur) { cur.remove(key); false } else { cur.add(key); true }
@@ -193,7 +180,6 @@ object ScheduleStore {
     }
 
     // ─── Заметки ───
-
     fun notes(ctx: Context): List<Note> {
         notesCache?.let { return it }
         val result = try {
@@ -203,16 +189,13 @@ object ScheduleStore {
         notesCache = result
         return result
     }
-
     private fun saveNotes(ctx: Context, notes: List<Note>) {
         ctx.openFileOutput(NOTES_FILE, Context.MODE_PRIVATE)
             .use { it.write(json.encodeToString(ListSerializer(Note.serializer()), notes).toByteArray()) }
         notesCache = notes
     }
-
     fun getNote(ctx: Context, key: String): String =
         notes(ctx).firstOrNull { it.key == key }?.text ?: ""
-
     fun setNote(ctx: Context, key: String, text: String) {
         val cur = notes(ctx).toMutableList()
         cur.removeAll { it.key == key }
@@ -220,8 +203,7 @@ object ScheduleStore {
         saveNotes(ctx, cur)
     }
 
-    // ─── Данные ───
-
+    // ─── Данные для ученика ───
     fun pairsFor(ctx: Context, day: String, week: WeekType): List<Lesson> {
         val g = group(ctx)
         val key = "$day|${week.name}|$g"
@@ -246,6 +228,7 @@ object ScheduleStore {
     fun allGroups(ctx: Context): List<String> =
         load(ctx)?.pairs?.map { it.group }?.distinct()?.sorted() ?: emptyList()
 
+    // ─── Данные для преподавателя (для уведомлений, все дни) ───
     fun pairsForTeacher(ctx: Context, day: String, week: WeekType, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
         return all.filter { l ->
@@ -262,20 +245,19 @@ object ScheduleStore {
         }.sortedWith(compareBy({ dayOrder(it.day) }, { it.number }))
     }
 
-    fun lessonsByTeacher(ctx: Context, teacher: String): List<Lesson> {
+    /** Все пары преподавателя за текущую неделю (для диалога по тапу). */
+    fun lessonsByTeacherCurrentWeek(ctx: Context, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
+        val currentWeek = currentWeek(ctx)
         val unique = LinkedHashMap<String, Lesson>()
         for (l in all) {
+            if (l.week != currentWeek) continue
             if (!l.subgroups.any { it.teacher.contains(teacher, true) }) continue
-            val key = "${l.day}|${l.week.name}|${l.number}|${l.group}"
+            val key = "${l.day}|${l.number}|${l.group}"
             if (!unique.containsKey(key)) unique[key] = l
         }
         return unique.values.sortedWith(
-            compareBy(
-                { if (it.week == WeekType.EVEN) 0 else 1 },
-                { dayOrder(it.day) },
-                { it.number }
-            )
+            compareBy({ dayOrder(it.day) }, { it.number })
         )
     }
 
@@ -288,8 +270,7 @@ object ScheduleStore {
     }
 
     // ─── Время ───
-
-    fun dayNameRu(): String = dayNameRuFor(Calendar.getInstance())
+    fun dayNameRu(): String = dayNameRuFor(InternetTime.calendar())
 
     fun dayNameRuFor(cal: Calendar): String = when (cal.get(Calendar.DAY_OF_WEEK)) {
         Calendar.MONDAY -> "ПОНЕДЕЛЬНИК"
@@ -329,8 +310,12 @@ object ScheduleStore {
         return if (weekNum % 2 == 0) WeekType.EVEN else WeekType.ODD
     }
 
-    fun currentWeek(ctx: Context): WeekType = autoWeekFor(Calendar.getInstance())
-    fun setCurrentWeek(ctx: Context, week: WeekType) { }
+    fun currentWeek(ctx: Context): WeekType = autoWeekFor(InternetTime.calendar())
+
+    /** Неделя для отображаемого дня (завтра или сегодня). */
+    fun displayWeek(ctx: Context): WeekType = autoWeekFor(InternetTime.displayCalendar())
+
+    fun setCurrentWeek(ctx: Context, week: WeekType) { /* не используется */ }
 
     fun timeToMinutes(t: String): Int? {
         val clean = t.trim().replace(':', '.')
