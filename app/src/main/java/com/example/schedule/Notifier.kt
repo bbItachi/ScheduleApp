@@ -235,7 +235,7 @@ object Notifier {
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
             if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_MONTH, 1)
         }
-        val intent = Intent(ctx, ScheduleUpdater.DailyUpdateReceiver::class.java)
+        val intent = Intent(ctx, DailyUpdateReceiver::class.java)
         val pi = PendingIntent.getBroadcast(ctx, reqCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         try { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi) }
