@@ -2,16 +2,26 @@
 //  КОНСТАНТЫ
 // ═══════════════════════════════════════════════════════════
 
-const SCHEDULE_URL = "https://api.allorigins.win/raw?url=http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx";
+const RAW_URL = "http://xn--j1ahcbhc.xn--p1ai/rasp.xlsx";
+
+// Каскад прокси — пробуем по очереди
+const PROXIES = [
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  u => `https://cors.eu.org/${u}`
+];
+
 const APK_URL = "https://github.com/bbItachi/ScheduleApp/releases/latest";
 const CHANNEL_URL = "https://max.ru/channel_rasp_spk";
 const STORAGE_KEY = "spk_schedule";
 const SETTINGS_KEY = "spk_settings";
-const BASE_WEEK = new Date(2026, 9, 5); // 5 октября 2026 (месяц 0-indexed)
+const BASE_WEEK = new Date(2026, 9, 5);
 const DAYS_RU = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"];
 
 // ═══════════════════════════════════════════════════════════
-//  ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+//  СОСТОЯНИЕ
 // ═══════════════════════════════════════════════════════════
 
 let lessons = [];
@@ -52,16 +62,45 @@ function saveSettings() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПАРСИНГ XLSX (через SheetJS)
+//  СКАЧИВАНИЕ С КАСКАДОМ ПРОКСИ
+// ═══════════════════════════════════════════════════════════
+
+async function fetchScheduleBytes(statusEl) {
+  let lastErr = "все прокси не сработали";
+  for (let i = 0; i < PROXIES.length; i++) {
+    const url = PROXIES[i](RAW_URL);
+    try {
+      if (statusEl) statusEl.textContent = `Скачиваем (способ ${i + 1}/${PROXIES.length})…`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) { lastErr = "HTTP " + res.status; continue; }
+      const buf = await res.arrayBuffer();
+      // Проверка: если размер < 1 КБ — скорее всего пришёл HTML, а не xlsx
+      if (buf.byteLength < 1024) { lastErr = "файл слишком маленький"; continue; }
+      // Проверка сигнатуры ZIP (xlsx — это ZIP с PK в начале)
+      const view = new Uint8Array(buf.slice(0, 4));
+      const isZip = view[0] === 0x50 && view[1] === 0x4B;
+      if (!isZip) { lastErr = "не xlsx (получен HTML)"; continue; }
+      return buf;
+    } catch (e) {
+      lastErr = e.message || "network";
+    }
+  }
+  throw new Error(lastErr);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ПАРСИНГ XLSX
 // ═══════════════════════════════════════════════════════════
 
 function parseXlsx(arrayBuffer) {
   if (typeof XLSX === "undefined") {
-    throw new Error("Библиотека XLSX не загрузилась. Обновите страницу.");
+    throw new Error("Библиотека XLSX не загрузилась. Проверь интернет и обнови страницу.");
   }
   const wb = XLSX.read(arrayBuffer, { type: "array" });
+  console.log("📋 Листы:", wb.SheetNames);
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+  console.log("📋 Строк в листе:", rows.length);
 
   let groupRow = -1;
   for (let r = 0; r < rows.length; r++) {
@@ -71,6 +110,7 @@ function parseXlsx(arrayBuffer) {
     }
     if (groupRow >= 0) break;
   }
+  console.log("📋 Строка с группами:", groupRow);
   if (groupRow < 0) throw new Error("Не найдена строка с группами");
 
   const groups = [];
@@ -84,6 +124,7 @@ function parseXlsx(arrayBuffer) {
     if (v.length < 3 || v.length > 40) continue;
     groups.push({ col: c, name: v });
   }
+  console.log("📋 Найдено групп:", groups.length);
   if (groups.length === 0) throw new Error("Группы не найдены");
 
   const result = [];
@@ -129,22 +170,22 @@ function parseXlsx(arrayBuffer) {
         for (let k = 0; k < 2; k++) {
           const si = subjectPos[k], ri = roomPos[k];
           const teacher = teachCells[si] || teachCells.find(x => x) || "";
-          const { t, r } = cleanOnline(teacher, rowCells[ri]);
-          subs.push({ index: k + 1, subject: rowCells[si], teacher: t, room: r });
+          const { t, r: rr } = cleanOnline(teacher, rowCells[ri]);
+          subs.push({ index: k + 1, subject: rowCells[si], teacher: t, room: rr });
         }
       } else if (subjectPos.length === 1) {
         const si = subjectPos[0];
         const ri = roomPos[0];
         const teacher = teachCells[si] || teachCells.find(x => x) || "";
-        const { t, r } = cleanOnline(teacher, ri != null ? rowCells[ri] : "");
-        subs.push({ index: 1, subject: rowCells[si], teacher: t, room: r });
+        const { t, r: rr } = cleanOnline(teacher, ri != null ? rowCells[ri] : "");
+        subs.push({ index: 1, subject: rowCells[si], teacher: t, room: rr });
       } else if (subjectPos.length >= 2) {
         const rawRoom = roomPos[0] != null ? rowCells[roomPos[0]] : "";
         for (let k = 0; k < 2; k++) {
           const si = subjectPos[k];
           const teacher = teachCells[si] || "";
-          const { t, r } = cleanOnline(teacher, rawRoom);
-          subs.push({ index: k + 1, subject: rowCells[si], teacher: t, room: r });
+          const { t, r: rr } = cleanOnline(teacher, rawRoom);
+          subs.push({ index: k + 1, subject: rowCells[si], teacher: t, room: rr });
         }
       }
 
@@ -160,6 +201,7 @@ function parseXlsx(arrayBuffer) {
       }
     }
   }
+  console.log("✅ Распарсено пар:", result.length);
   return result;
 }
 
@@ -189,7 +231,7 @@ function cleanOnline(teacher, room) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЛОГИКА НЕДЕЛИ
+//  НЕДЕЛЯ / ДЕНЬ
 // ═══════════════════════════════════════════════════════════
 
 function getCurrentWeek() {
@@ -213,7 +255,7 @@ function getDayName() {
 function weekLabel(w) { return w === "EVEN" ? "чётная" : "нечётная"; }
 
 // ═══════════════════════════════════════════════════════════
-//  ФИЛЬТРАЦИЯ ПАР
+//  ФИЛЬТРАЦИЯ
 // ═══════════════════════════════════════════════════════════
 
 function pairsForToday() {
@@ -319,7 +361,7 @@ function pairCardHtml(p) {
   let subsHtml = "";
   for (const sg of p.subgroups) {
     const prefix = p.subgroups.length > 1 ? `Подгр. ${sg.index}: ` : "";
-    const online = sg.room.toLowerCase().includes("онлайн");
+    const online = (sg.room || "").toLowerCase().includes("онлайн");
     let lines = "";
     if (online) {
       lines += `<div class="pair-line online">🌐 Онлайн</div>`;
@@ -414,7 +456,7 @@ function escapeHtml(s) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  РЕНДЕР НАСТРОЕК
+//  НАСТРОЙКИ
 // ═══════════════════════════════════════════════════════════
 
 function renderSettings() {
@@ -442,17 +484,15 @@ function formatLastUpdate(ts) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЗАГРУЗКА РАСПИСАНИЯ
+//  ЗАГРУЗКА
 // ═══════════════════════════════════════════════════════════
 
 async function downloadFromSite(statusEl) {
   if (statusEl) statusEl.textContent = "Скачиваем…";
   try {
-    const res = await fetch(SCHEDULE_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const buf = await res.arrayBuffer();
+    const buf = await fetchScheduleBytes(statusEl);
     const parsed = parseXlsx(buf);
-    if (parsed.length === 0) throw new Error("Пустой файл");
+    if (parsed.length === 0) throw new Error("Файл пустой или не распознан");
     saveSchedule(parsed);
     settings.lastUpdate = Date.now();
     saveSettings();
@@ -465,7 +505,7 @@ async function downloadFromSite(statusEl) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  НАВИГАЦИЯ ВКЛАДОК
+//  НАВИГАЦИЯ
 // ═══════════════════════════════════════════════════════════
 
 function showTab(name) {
@@ -498,9 +538,7 @@ function setupOnboarding() {
       document.getElementById("onboarding-student").classList.toggle("hidden", role !== "student");
       document.getElementById("onboarding-teacher").classList.toggle("hidden", role !== "teacher");
 
-      if (!downloadOk && lessons.length === 0) {
-        autoDownload();
-      }
+      if (!downloadOk && lessons.length === 0) autoDownload();
       updateStartBtn();
     });
   });
@@ -545,22 +583,42 @@ function setupOnboarding() {
   document.getElementById("btn-download-site").addEventListener("click", autoDownload);
   document.getElementById("btn-download-site-teacher").addEventListener("click", autoDownload);
 
+  // Загрузка файла вручную — студент
   document.getElementById("file-input").addEventListener("change", async (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    const statusEl = role === "teacher"
-      ? document.getElementById("onboard-status-teacher")
-      : document.getElementById("onboard-status");
+    const statusEl = document.getElementById("onboard-status");
     statusEl.textContent = "Обрабатываем…";
     try {
       const buf = await f.arrayBuffer();
       const parsed = parseXlsx(buf);
+      if (parsed.length === 0) throw new Error("Файл пустой или не распознан");
       saveSchedule(parsed);
       settings.lastUpdate = Date.now();
       saveSettings();
       parsedGroups = [...new Set(parsed.map(l => l.group))].sort();
       renderGroups();
       downloadOk = true;
+      statusEl.textContent = `Загружено пар: ${parsed.length}`;
+    } catch (err) {
+      statusEl.textContent = "Ошибка: " + err.message;
+    }
+    updateStartBtn();
+  });
+
+  // Загрузка файла вручную — преподаватель
+  document.getElementById("file-input-teacher").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const statusEl = document.getElementById("onboard-status-teacher");
+    statusEl.textContent = "Обрабатываем…";
+    try {
+      const buf = await f.arrayBuffer();
+      const parsed = parseXlsx(buf);
+      if (parsed.length === 0) throw new Error("Файл пустой или не распознан");
+      saveSchedule(parsed);
+      settings.lastUpdate = Date.now();
+      saveSettings();
       statusEl.textContent = `Загружено пар: ${parsed.length}`;
     } catch (err) {
       statusEl.textContent = "Ошибка: " + err.message;
@@ -587,7 +645,7 @@ function setupOnboarding() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  СТАРТ ПРИЛОЖЕНИЯ
+//  СТАРТ
 // ═══════════════════════════════════════════════════════════
 
 function startApp() {
@@ -600,10 +658,7 @@ function startApp() {
   renderPairStatus();
   renderToday();
 
-  setInterval(() => {
-    renderHeader();
-    renderPairStatus();
-  }, 30000);
+  setInterval(() => { renderHeader(); renderPairStatus(); }, 30000);
 
   document.querySelectorAll(".nav-btn").forEach(b => {
     b.addEventListener("click", () => showTab(b.dataset.tab));
@@ -612,7 +667,7 @@ function startApp() {
   document.getElementById("btn-refresh").addEventListener("click", async () => {
     const ok = await downloadFromSite(null);
     if (ok) { renderToday(); renderHeader(); }
-    else alert("Не удалось скачать расписание");
+    else alert("Не удалось скачать расписание. Попробуй загрузить файл вручную — кнопка 📤 справа.");
   });
 
   document.getElementById("btn-upload").addEventListener("click", () => {
@@ -625,6 +680,7 @@ function startApp() {
     try {
       const buf = await f.arrayBuffer();
       const parsed = parseXlsx(buf);
+      if (parsed.length === 0) throw new Error("Файл пустой или не распознан");
       saveSchedule(parsed);
       settings.lastUpdate = Date.now();
       saveSettings();
@@ -654,15 +710,11 @@ function startApp() {
   document.getElementById("btn-update-now").addEventListener("click", async () => {
     const ok = await downloadFromSite(null);
     renderSettings(); renderToday(); renderHeader();
-    if (!ok) alert("Не удалось скачать");
+    if (!ok) alert("Не удалось скачать. Загрузи файл вручную через главный экран.");
   });
 
   document.getElementById("settings-apk").addEventListener("click", () => window.open(APK_URL, "_blank"));
-
-  const allSettings = document.querySelectorAll(".setting-row");
-  if (allSettings.length > 0) {
-    allSettings[allSettings.length - 1].addEventListener("click", () => window.open(CHANNEL_URL, "_blank"));
-  }
+  document.getElementById("settings-channel").addEventListener("click", () => window.open(CHANNEL_URL, "_blank"));
 
   document.getElementById("search-input").addEventListener("input", renderWeek);
 }
@@ -677,10 +729,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
   setTimeout(() => {
     document.getElementById("loading-screen").classList.add("hidden");
-
-    if (settings.role) {
-      startApp();
-    } else {
+    if (settings.role) startApp();
+    else {
       document.getElementById("onboarding-screen").classList.remove("hidden");
       setupOnboarding();
     }
