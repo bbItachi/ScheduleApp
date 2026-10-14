@@ -2,13 +2,15 @@
 //  SERVICE WORKER — офлайн-режим
 // ═══════════════════════════════════════════════════════════
 
-const CACHE_NAME = "spk-schedule-v1";
+const CACHE_NAME = "spk-schedule-v2";
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
   "./manifest.json",
+  "./schedule.xlsx",
+  "./lib/xlsx.full.min.js",
   "./icon-192.png",
   "./icon-512.png"
 ];
@@ -35,22 +37,18 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // SheetJS и расписание с сайта — только из сети
-  if (url.hostname.includes("cdn.sheetjs.com") || url.hostname.includes("xn--")) {
-    return;
-  }
+  // Запросы к внешним доменам — только из сети
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(response => {
-        // Кэшируем только успешные GET-запросы своих файлов
-        if (event.request.method === "GET" && response.ok && url.origin === self.location.origin) {
+    fetch(event.request)
+      .then(response => {
+        if (event.request.method === "GET" && response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }
         return response;
-      }).catch(() => caches.match("./index.html"));
-    })
+      })
+      .catch(() => caches.match(event.request).then(c => c || caches.match("./index.html")))
   );
 });
