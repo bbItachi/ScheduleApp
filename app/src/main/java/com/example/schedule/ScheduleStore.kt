@@ -2,6 +2,9 @@ package com.example.schedule
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.Calendar
@@ -24,9 +27,9 @@ object ScheduleStore {
     const val THEME_DARK = "DARK"
     const val THEME_LIGHT = "LIGHT"
 
-    var themeRevision by androidx.compose.runtime.mutableStateOf(0)
+    var themeRevision by mutableStateOf(0)
         private set
-    var settingsRevision by androidx.compose.runtime.mutableStateOf(0)
+    var settingsRevision by mutableStateOf(0)
         private set
 
     private var scheduleCache: SavedSchedule? = null
@@ -228,7 +231,7 @@ object ScheduleStore {
     fun allGroups(ctx: Context): List<String> =
         load(ctx)?.pairs?.map { it.group }?.distinct()?.sorted() ?: emptyList()
 
-    // ─── Данные для преподавателя (для уведомлений, все дни) ───
+    // ─── Данные для преподавателя ───
     fun pairsForTeacher(ctx: Context, day: String, week: WeekType, teacher: String): List<Lesson> {
         val all = load(ctx)?.pairs ?: return emptyList()
         return all.filter { l ->
