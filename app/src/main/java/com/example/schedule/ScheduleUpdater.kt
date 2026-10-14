@@ -1,6 +1,8 @@
 package com.example.schedule
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import androidx.work.*
 import java.net.HttpURLConnection
 import java.net.URL
@@ -17,7 +19,7 @@ class ScheduleUpdater(ctx: Context, params: WorkerParameters) : Worker(ctx, para
                 requestMethod = "GET"
                 connectTimeout = 30_000
                 readTimeout = 60_000
-                setRequestProperty("User-Agent", "ScheduleApp/1.6")
+                setRequestProperty("User-Agent", "ScheduleApp/1.12")
                 instanceFollowRedirects = true
             }
 
@@ -30,7 +32,6 @@ class ScheduleUpdater(ctx: Context, params: WorkerParameters) : Worker(ctx, para
             ScheduleStore.setLastAutoUpdate(ctx, System.currentTimeMillis())
 
             ScheduleWidget.updateAll(ctx)
-
             Notifier.scheduleBeforePairs(ctx)
             Notifier.scheduleDnd(ctx)
 
@@ -76,5 +77,18 @@ class ScheduleUpdater(ctx: Context, params: WorkerParameters) : Worker(ctx, para
                 .build()
             WorkManager.getInstance(ctx).enqueue(request)
         }
+    }
+}
+
+/**
+ * Приёмник ежедневного автообновления.
+ * Срабатывает в 7:00 и 18:00 (Asia/Tomsk).
+ * Запускает скачивание расписания и перепланирует будильник на следующий день.
+ */
+class DailyUpdateReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        ScheduleUpdater.runNow(ctx)
+        // Сразу планируем следующий будильник на завтра
+        Notifier.scheduleBothDailyUpdates(ctx)
     }
 }
