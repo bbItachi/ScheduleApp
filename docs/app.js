@@ -9,18 +9,17 @@ const STORAGE_KEY = "spk_schedule";
 const SETTINGS_KEY = "spk_settings";
 const BASE_WEEK = new Date(2026, 9, 5); // 5 октября 2026 (месяц 0-indexed)
 const DAYS_RU = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"];
-const DAYS_ORDER = { "ПОНЕДЕЛЬНИК": 1, "ВТОРНИК": 2, "СРЕДА": 3, "ЧЕТВЕРГ": 4, "ПЯТНИЦА": 5, "СУББОТА": 6, "ВОСКРЕСЕНЬЕ": 7 };
 
 // ═══════════════════════════════════════════════════════════
 //  ГЛОБАЛЬНОЕ СОСТОЯНИЕ
 // ═══════════════════════════════════════════════════════════
 
-let lessons = [];        // все пары
+let lessons = [];
 let settings = {
-  role: "",              // "student" / "teacher"
+  role: "",
   group: "",
   teacherName: "",
-  theme: "AUTO",         // AUTO / DARK / LIGHT
+  theme: "AUTO",
   lastUpdate: 0,
   morningHour: 7,
   morningMinute: 0,
@@ -57,11 +56,13 @@ function saveSettings() {
 // ═══════════════════════════════════════════════════════════
 
 function parseXlsx(arrayBuffer) {
+  if (typeof XLSX === "undefined") {
+    throw new Error("Библиотека XLSX не загрузилась. Обновите страницу.");
+  }
   const wb = XLSX.read(arrayBuffer, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
 
-  // Находим строку с "Группа:"
   let groupRow = -1;
   for (let r = 0; r < rows.length; r++) {
     for (let c = 0; c < (rows[r] || []).length; c++) {
@@ -72,7 +73,6 @@ function parseXlsx(arrayBuffer) {
   }
   if (groupRow < 0) throw new Error("Не найдена строка с группами");
 
-  // Собираем группы: col → name
   const groups = [];
   const groupRowData = rows[groupRow] || [];
   for (let c = 0; c < groupRowData.length; c++) {
@@ -93,27 +93,22 @@ function parseXlsx(arrayBuffer) {
   for (let r = groupRow + 1; r < rows.length; r++) {
     const row = rows[r] || [];
 
-    // Метка "ЧЕТНАЯ НЕДЕЛЯ"
     for (let c = 0; c < row.length; c++) {
       const v = String(row[c] || "");
       if (/чётная|четная/i.test(v)) { week = "EVEN"; break; }
     }
 
-    // День недели (1-3 колонки)
     for (let c = 0; c < 3; c++) {
       const v = String(row[c] || "").trim().toUpperCase();
       if (DAYS_RU.includes(v)) { currentDay = v; break; }
     }
 
-    // Номер пары (2-я колонка)
     const pairNum = parseInt(String(row[2] || "").trim(), 10);
     if (!pairNum || !currentDay) continue;
 
-    // Время (4-я колонка)
     const time = String(row[4] || "").trim();
     if (!time) continue;
 
-    // Разбираем данные каждой группы
     for (let i = 0; i < groups.length; i++) {
       const { col: colStart, name: groupName } = groups[i];
       const rowCells = [0, 1, 2, 3].map(k => String(row[colStart + k] || "").trim());
@@ -173,7 +168,7 @@ function looksLikeRoom(v) {
   const t = v.trim();
   if (/онлайн/i.test(t)) {
     const w = t.replace(/онлайн/gi, "").trim().replace(/[,.;\-_ ]+$/g, "");
-    return !/[А-Яа-яA-Za-z]/.test(w); // если остались буквы — не аудитория
+    return !/[А-Яа-яA-Za-z]/.test(w);
   }
   const upper = t.toUpperCase();
   if (["ЦРК", "М", "СЗ", "СЗ/1", "СЗ/2", "М/1", "М/2"].includes(upper)) return true;
@@ -200,7 +195,7 @@ function cleanOnline(teacher, room) {
 function getCurrentWeek() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const dow = today.getDay(); // 0=Вс, 1=Пн, ...
+  const dow = today.getDay();
   const daysFromMonday = dow === 0 ? 6 : dow - 1;
   const monday = new Date(today);
   monday.setDate(today.getDate() - daysFromMonday);
@@ -222,9 +217,7 @@ function weekLabel(w) { return w === "EVEN" ? "чётная" : "нечётная
 // ═══════════════════════════════════════════════════════════
 
 function pairsForToday() {
-  const day = getDayName();
-  const week = getCurrentWeek();
-  return filterPairs(day, week);
+  return filterPairs(getDayName(), getCurrentWeek());
 }
 
 function filterPairs(day, week) {
@@ -505,7 +498,6 @@ function setupOnboarding() {
       document.getElementById("onboarding-student").classList.toggle("hidden", role !== "student");
       document.getElementById("onboarding-teacher").classList.toggle("hidden", role !== "teacher");
 
-      // Автоскачивание при выборе роли
       if (!downloadOk && lessons.length === 0) {
         autoDownload();
       }
@@ -556,7 +548,9 @@ function setupOnboarding() {
   document.getElementById("file-input").addEventListener("change", async (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    const statusEl = role === "teacher" ? document.getElementById("onboard-status-teacher") : document.getElementById("onboard-status");
+    const statusEl = role === "teacher"
+      ? document.getElementById("onboard-status-teacher")
+      : document.getElementById("onboard-status");
     statusEl.textContent = "Обрабатываем…";
     try {
       const buf = await f.arrayBuffer();
@@ -606,28 +600,25 @@ function startApp() {
   renderPairStatus();
   renderToday();
 
-  // Обновление часов и статуса пары каждые 30 секунд
   setInterval(() => {
     renderHeader();
     renderPairStatus();
   }, 30000);
 
-  // Нижняя навигация
   document.querySelectorAll(".nav-btn").forEach(b => {
     b.addEventListener("click", () => showTab(b.dataset.tab));
   });
 
-  // Кнопка «Обновить» на главной
   document.getElementById("btn-refresh").addEventListener("click", async () => {
     const ok = await downloadFromSite(null);
     if (ok) { renderToday(); renderHeader(); }
     else alert("Не удалось скачать расписание");
   });
 
-  // Кнопка «Загрузить файл» на главной
   document.getElementById("btn-upload").addEventListener("click", () => {
     document.getElementById("file-input-main").click();
   });
+
   document.getElementById("file-input-main").addEventListener("change", async (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -642,13 +633,12 @@ function startApp() {
     } catch (err) { alert("Ошибка: " + err.message); }
   });
 
-  // Настройки — тема
   document.getElementById("settings-theme").addEventListener("click", () => {
-    settings.theme = settings.theme === "AUTO" ? "LIGHT" : settings.theme === "LIGHT" ? "DARK" : "AUTO";
+    settings.theme = settings.theme === "AUTO" ? "LIGHT"
+      : settings.theme === "LIGHT" ? "DARK" : "AUTO";
     saveSettings(); applyTheme(); renderSettings();
   });
 
-  // Настройки — напоминание
   document.getElementById("settings-before").addEventListener("click", () => {
     const arr = [5, 10, 15, 20, 30];
     const i = arr.indexOf(settings.beforeMinutes);
@@ -656,25 +646,24 @@ function startApp() {
     saveSettings(); renderSettings();
   });
 
-  // Настройки — утренняя сводка
   document.getElementById("settings-morning").addEventListener("click", () => {
     settings.morningHour = (settings.morningHour + 1) % 24;
     saveSettings(); renderSettings();
   });
 
-  // Настройки — обновить сейчас
   document.getElementById("btn-update-now").addEventListener("click", async () => {
     const ok = await downloadFromSite(null);
     renderSettings(); renderToday(); renderHeader();
     if (!ok) alert("Не удалось скачать");
   });
 
-  // Настройки — APK / канал
   document.getElementById("settings-apk").addEventListener("click", () => window.open(APK_URL, "_blank"));
-  document.querySelectorAll(".setting-row")[document.querySelectorAll(".setting-row").length - 1]
-    .addEventListener("click", () => window.open(CHANNEL_URL, "_blank"));
 
-  // Поле поиска
+  const allSettings = document.querySelectorAll(".setting-row");
+  if (allSettings.length > 0) {
+    allSettings[allSettings.length - 1].addEventListener("click", () => window.open(CHANNEL_URL, "_blank"));
+  }
+
   document.getElementById("search-input").addEventListener("input", renderWeek);
 }
 
@@ -697,7 +686,6 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }, 400);
 
-  // Service Worker
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
