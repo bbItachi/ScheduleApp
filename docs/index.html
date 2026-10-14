@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0E14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="расписание СПК">
+<title>расписание СПК</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ЭКРАН ЗАГРУЗКИ
+     ═══════════════════════════════════════════════════════════ -->
+<div id="loading-screen" class="screen">
+  <div class="loading-content">
+    <div class="spinner"></div>
+    <div class="loading-text">Загружаем…</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ЭКРАН ЗАГРУЗКИ XLSX
+     ═══════════════════════════════════════════════════════════ -->
+<div id="onboarding-screen" class="screen hidden">
+  <div class="onboarding-content">
+    <h1 class="onboarding-title">Добро пожаловать!</h1>
+    <div class="onboarding-subtitle">расписание СПК</div>
+
+    <div class="onboarding-section">
+      <div class="onboarding-label">1. Кто ты?</div>
+      <div class="role-cards">
+        <div class="role-card" data-role="student">
+          <div class="role-icon">🎓</div>
+          <div class="role-title">Ученик</div>
+        </div>
+        <div class="role-card" data-role="teacher">
+          <div class="role-icon">👤</div>
+          <div class="role-title">Преподаватель</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="onboarding-student" class="onboarding-block hidden">
+      <div class="onboarding-label">2. Расписание</div>
+      <div id="onboard-status" class="status-text"></div>
+
+      <button id="btn-download-site" class="btn-primary">
+        <span class="btn-icon">🔄</span>
+        Скачать с сайта
+      </button>
+      <label class="btn-outline-file">
+        <span class="btn-icon">📤</span>
+        Выбрать файл
+        <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
+      </label>
+
+      <div id="onboard-groups" class="groups-list"></div>
+
+      <div class="onboarding-section" style="margin-top:24px">
+        <div class="onboarding-label">3. Подпишись на канал</div>
+        <a href="https://max.ru/channel_rasp_spk" target="_blank" class="btn-outline">
+          <span class="btn-icon">🔗</span>
+          Открыть канал MAX
+        </a>
+      </div>
+    </div>
+
+    <div id="onboarding-teacher" class="onboarding-block hidden">
+      <div class="onboarding-label">2. Твоё ФИО</div>
+      <input type="text" id="teacher-name-input" class="text-input" placeholder="Лизнева К.А.">
+
+      <div class="onboarding-label" style="margin-top:16px">3. Расписание</div>
+      <div id="onboard-status-teacher" class="status-text"></div>
+      <button id="btn-download-site-teacher" class="btn-primary">
+        <span class="btn-icon">🔄</span>
+        Скачать с сайта
+      </button>
+    </div>
+
+    <button id="btn-start" class="btn-primary btn-start" disabled>Начать</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ГЛАВНОЕ ПРИЛОЖЕНИЕ
+     ═══════════════════════════════════════════════════════════ -->
+<div id="app" class="screen hidden">
+
+  <!-- Шапка -->
+  <div class="top-card">
+    <div class="top-left">
+      <div id="date-text" class="date-text">—</div>
+      <div id="time-text" class="time-text">—</div>
+    </div>
+    <div class="top-right">
+      <div id="week-badge" class="week-badge">чётная</div>
+      <div id="group-text" class="group-text">—</div>
+    </div>
+  </div>
+
+  <!-- Плашка «сколько до пары» -->
+  <div id="pair-status" class="pair-status hidden"></div>
+
+  <!-- Сегодня -->
+  <div id="tab-today" class="tab-content">
+    <div id="day-header" class="day-header"></div>
+    <div id="pairs-list" class="pairs-list"></div>
+    <div id="today-bottom" class="today-bottom">
+      <button id="btn-refresh" class="circle-btn" title="Обновить с сайта">🔄</button>
+      <button id="btn-upload" class="circle-btn" title="Загрузить файл">📤</button>
+    </div>
+    <input type="file" id="file-input-main" accept=".xlsx,.xls" hidden>
+  </div>
+
+  <!-- Неделя -->
+  <div id="tab-week" class="tab-content hidden">
+    <div class="week-header-row">
+      <div class="week-header-title">Неделя</div>
+      <div id="week-badge-2" class="week-badge">чётная</div>
+    </div>
+    <input type="text" id="search-input" class="search-input" placeholder="Поиск: предмет, преподаватель, аудитория">
+    <div id="week-list" class="week-list"></div>
+  </div>
+
+  <!-- Настройки -->
+  <div id="tab-settings" class="tab-content hidden">
+    <div class="settings-title">Настройки</div>
+
+    <div class="section-title">ОСНОВНОЕ</div>
+    <div id="settings-group" class="setting-row">
+      <div class="setting-name">Группа</div>
+      <div id="settings-group-value" class="setting-value">—</div>
+    </div>
+    <div id="settings-morning" class="setting-row">
+      <div class="setting-name">Утренняя сводка</div>
+      <div id="settings-morning-value" class="setting-value">07:00</div>
+    </div>
+    <div id="settings-before" class="setting-row">
+      <div class="setting-name">Напоминание до пары</div>
+      <div id="settings-before-value" class="setting-value">15 мин</div>
+    </div>
+
+    <div class="section-title">ТЕМА ОФОРМЛЕНИЯ</div>
+    <div id="settings-theme" class="setting-row">
+      <div class="setting-name">Тема</div>
+      <div id="settings-theme-value" class="setting-value">Авто</div>
+    </div>
+
+    <div class="section-title">РАСПИСАНИЕ</div>
+    <div id="settings-last-update" class="setting-row">
+      <div class="setting-name">Последнее обновление</div>
+      <div id="settings-last-value" class="setting-value">—</div>
+    </div>
+    <div id="settings-auto-update" class="setting-row">
+      <div class="setting-name">Автообновление</div>
+      <div id="settings-auto-value" class="setting-value">Вкл</div>
+    </div>
+    <button id="btn-update-now" class="btn-primary" style="margin-top:10px">Обновить сейчас</button>
+
+    <div class="section-title">О ПРИЛОЖЕНИИ</div>
+    <div id="settings-apk" class="setting-row">
+      <div class="setting-name">Android-версия (APK)</div>
+      <div class="setting-value">↗</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-name">Канал MAX</div>
+      <div class="setting-value">↗</div>
+    </div>
+    <div class="version-text">Веб-версия 1.0</div>
+  </div>
+
+  <!-- Нижняя навигация -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="today">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">Сегодня</span>
+    </button>
+    <button class="nav-btn" data-tab="week">
+      <span class="nav-icon">📅</span>
+      <span class="nav-label">Неделя</span>
+    </button>
+    <button class="nav-btn" data-tab="settings">
+      <span class="nav-icon">⚙️</span>
+      <span class="nav-label">Настройки</span>
+    </button>
+  </nav>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
